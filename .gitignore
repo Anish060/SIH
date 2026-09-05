@@ -1,0 +1,16 @@
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# NetCDF datasets & Large Binaries
+*.nc
+/kaggle/
+scratch/
+
+# Environments & IDEs
+.vscode/
+.idea/
+.env
+*.log
