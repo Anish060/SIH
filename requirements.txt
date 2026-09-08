@@ -1,0 +1,22 @@
+# Core PyTorch & Machine Learning
+torch>=2.0.0
+numpy>=1.24.0
+
+# FastAPI Backend & Async Web Server
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+pydantic>=2.0.0
+
+# Oceanographic Data Processing & NetCDF Handling
+xarray>=2023.5.0
+pandas>=2.0.0
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Visualization & Data Analysis
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Copernicus Marine Service & ERA5 CDS APIs
+copernicusmarine>=1.0.0
+cdsapi>=0.6.1
