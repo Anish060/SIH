@@ -533,163 +533,146 @@ export default function OceanEmbedApp() {
     }
   }, [volumeSliceGrid, digitalTwinMode, currentDepth, prediction]);
 
+
+  // Derived values used across the insight panels
+  const cyclone = prediction?.derived_pillars?.cyclone || {};
+  const asw = prediction?.derived_pillars?.asw_defense || {};
+  const fisheries = prediction?.derived_pillars?.fisheries || {};
+  const tchp = cyclone.tchp_kj_cm2 ?? 3.82;
+  const d26 = cyclone.d26_depth_m ?? 34.6;
+  const shadowStart = asw.sonic_shadow_zone?.start_depth_m ?? 75;
+  const shadowEnd = asw.sonic_shadow_zone?.end_depth_m ?? 150;
+  const thermoclineCore = asw.thermocline_core_depth_m ?? 75;
+  const maxGradient = asw.max_thermal_gradient_c_per_m ?? -0.176;
+  const upwelling = fisheries.upwelling_index_c ?? 4.75;
+  const borderDistance = fisheries.distance_to_border_km ?? 32.5;
+  const layerName = currentDepth <= 50 ? "Mixed layer" : currentDepth <= 200 ? "Thermocline" : "Deep water";
+  const latent = prediction?.latent_embedding || {};
+
+  const insightTabs = [
+    { id: "cyclone", icon: "air", accent: "text-rose-600", name: "Cyclone potential", metric: `${tchp.toFixed(1)} kJ/cm²`, caption: "Heat stored above the 26 °C isotherm" },
+    { id: "asw", icon: "sensors", accent: "text-purple-600", name: "Sonar shadow", metric: `${shadowStart}–${shadowEnd} m`, caption: "Depth band hidden from surface sonar" },
+    { id: "fisheries", icon: "sailing", accent: "text-emerald-600", name: "Fishing zones", metric: `+${upwelling.toFixed(2)} °C`, caption: "Upwelling index, surface to 50 m" },
+    { id: "volume", icon: "layers", accent: "text-cyan-600", name: "Water column", metric: `${thermoclineCore} m`, caption: "Thermocline core depth" }
+  ];
+
+  const inputFields = [
+    { key: "sst", label: "Sea surface temp", unit: "°C", step: "0.1" },
+    { key: "ssh", label: "Surface height", unit: "m", step: "0.01" },
+    { key: "sss", label: "Salinity anomaly", unit: "PSU", step: "0.01" },
+    { key: "uo", label: "Current, east", unit: "m/s", step: "0.01" },
+    { key: "vo", label: "Current, north", unit: "m/s", step: "0.01" },
+    { key: "u10", label: "Wind, east", unit: "m/s", step: "0.1" },
+    { key: "v10", label: "Wind, north", unit: "m/s", step: "0.1" }
+  ];
+
+  const card = "bg-surface-container-lowest rounded-xl border border-surface-container-high";
+  const ghostButton = "inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-body-sm font-medium text-primary bg-surface-container-lowest border border-surface-container-high hover:bg-surface-container-low transition disabled:opacity-40";
+
   return (
     <div className="min-h-screen bg-surface text-on-surface flex flex-col selection:bg-secondary-container selection:text-on-secondary-container">
-      {/* =========================================================================
-          TOP NAVIGATION BAR (Strictly Team OceanSATX / Material Design 3 Light Theme)
-          ========================================================================= */}
-      <header className="fixed top-0 left-0 right-0 w-full z-50 bg-surface/90 backdrop-blur-xl border-b border-surface-container-high/60 shadow-[0_1px_8px_rgba(0,30,46,0.05)]">
-        <div className="h-16 w-full px-margin-desktop flex items-center justify-between gap-space-md">
-          {/* Logo & Hackathon Identity */}
-          <div className="flex items-center gap-space-lg">
-            <div className="flex items-center gap-space-sm">
-              <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center shadow-md">
-                <svg className="w-5 h-5 text-on-primary" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <header className="fixed top-0 inset-x-0 z-50 bg-surface/90 backdrop-blur-xl border-b border-surface-container-high/60">
+        <div className="h-16 max-w-7xl mx-auto px-margin-mobile sm:px-margin-desktop flex items-center justify-between gap-6">
+          <div className="flex items-center gap-10">
+            <a href="/" className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <path d="M2 15C5 12 8 18 12 15C16 12 19 18 22 15" stroke="#FFFFFF" strokeLinecap="round" strokeWidth="2.2"></path>
                   <ellipse cx="12" cy="12" rx="9" ry="4.5" stroke="#00B1C9" strokeDasharray="2 2" strokeWidth="1.6" transform="rotate(-25 12 12)"></ellipse>
                 </svg>
               </div>
-              <div className="flex flex-col">
-                <span className="font-headline-sm text-headline-sm text-primary tracking-tight font-semibold leading-none">
-                  OceanEmbed
-                </span>
-                <span className="font-caption-coordinate text-caption-coordinate uppercase text-secondary tracking-wider mt-space-2xs">
-                  3D Ocean Digital Twin • SIH 2026 PS 26066
-                </span>
-              </div>
-            </div>
+              <span className="font-headline-sm text-headline-sm text-primary">OceanEmbed</span>
+            </a>
 
-            {/* Quick Section Anchors */}
-            <nav className="hidden xl:flex items-center gap-space-lg font-body-sm text-body-sm text-on-surface-variant">
-              <a href="#digital-twin-3d" className="hover:text-primary transition font-medium">
-                3D Digital Twin
-              </a>
-              <a href="#interactive-map" className="hover:text-primary transition font-medium">
-                GIS Ocean Probe
-              </a>
-              <a href="#pillars" className="hover:text-primary transition font-medium">
-                4 Core Pillars
-              </a>
-              <a href="#benchmarks" className="hover:text-primary transition font-medium">
-                54,606 ARGO Buoys
-              </a>
+            <nav className="hidden lg:flex items-center gap-6 text-body-md text-on-surface-variant">
+              <a href="#twin" className="hover:text-primary transition">3D view</a>
+              <a href="#replay" className="hover:text-primary transition">Cyclone replay</a>
+              <a href="#probe" className="hover:text-primary transition">Probe</a>
+              <a href="#insights" className="hover:text-primary transition">Insights</a>
+              <a href="#validation" className="hover:text-primary transition">Validation</a>
             </nav>
           </div>
 
-          {/* Real PyTorch Backend Connection Status Badge */}
-          <div className="flex items-center gap-space-sm">
-            <div className="flex items-center gap-1.5 px-space-md py-space-2xs rounded-full bg-surface-container-low border border-surface-container-high text-primary font-caption-coordinate text-caption-coordinate">
-              <span className={`w-2 h-2 rounded-full ${backendStatus.connected ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`}></span>
-              <span className="font-mono font-medium">
-                {backendStatus.connected
-                  ? `PyTorch ${backendStatus.device.toUpperCase()} Connected (${backendStatus.params.toLocaleString()} Params)`
-                  : "Connecting to FastAPI..."}
-              </span>
-            </div>
-
+          <div className="flex items-center gap-4">
+            <span
+              className="hidden sm:inline-flex items-center gap-2 text-body-sm text-on-surface-variant"
+              title={`${backendStatus.params.toLocaleString()} parameters`}
+            >
+              <span className={`w-2 h-2 rounded-full ${backendStatus.connected ? "bg-emerald-500" : "bg-amber-500"}`}></span>
+              {backendStatus.connected ? `Model online · ${backendStatus.device.toUpperCase()}` : "Connecting…"}
+            </span>
             <button
               onClick={() => runPrediction(params, customCoord.lat, customCoord.lon)}
               disabled={loading}
-              className="inline-flex items-center gap-space-xs font-label-technical text-label-technical uppercase tracking-wider bg-primary hover:bg-secondary text-on-primary px-space-md py-space-xs rounded-lg shadow-sm transition"
+              className="inline-flex items-center gap-1.5 bg-primary hover:bg-secondary text-on-primary text-body-sm font-medium px-4 py-2 rounded-xl transition"
             >
-              <span className="material-symbols-outlined text-[16px]">{loading ? "hourglass_empty" : "refresh"}</span>
-              <span>{loading ? "Computing..." : "Run Model"}</span>
+              <span className="material-symbols-outlined text-[18px]">{loading ? "hourglass_empty" : "refresh"}</span>
+              {loading ? "Running…" : "Run model"}
             </button>
           </div>
         </div>
       </header>
 
-      {/* =========================================================================
-          MAIN APPLICATION COCKPIT (Material Design 3 Theme)
-          ========================================================================= */}
-      <main className="flex-1 w-full pt-20 pb-space-3xl px-margin-desktop max-w-7xl mx-auto flex flex-col gap-space-xl">
-        {/* Title Bar & Regional Station Preset Selector */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-space-md pb-space-sm border-b border-surface-container-high/60">
-          <div>
-            <div className="flex items-center gap-space-xs mb-1">
-              <span className="font-label-technical text-label-technical uppercase tracking-wider text-secondary font-semibold">
-                North Indian Ocean Basin (5°N – 30°N, 45°E – 105°E)
-              </span>
-              <span className="text-xs text-on-surface-variant font-mono">• 0.25° Spatial Patch</span>
-            </div>
-            <h1 className="font-headline-lg text-headline-lg text-primary tracking-tight font-semibold">
-              AI 3D Ocean Digital Twin &amp; Subsurface Reconstruction Engine
+      <main className="flex-1 w-full max-w-7xl mx-auto px-margin-mobile sm:px-margin-desktop pt-28 pb-24 flex flex-col gap-24">
+        {/* Intro & station presets */}
+        <div id="top" className="flex flex-col gap-8">
+          <div className="max-w-3xl">
+            <p className="font-label-technical text-label-technical uppercase tracking-wider text-secondary">
+              North Indian Ocean · 5–30°N, 45–105°E
+            </p>
+            <h1 className="mt-3 font-headline-lg text-headline-lg-mobile sm:text-headline-lg text-primary">
+              Subsurface ocean temperature, reconstructed from satellite data
             </h1>
+            <p className="mt-4 text-body-lg text-on-surface-variant">
+              Pick a station or click anywhere on the chart. The model turns seven surface readings into a
+              temperature profile down to 1000 m.
+            </p>
           </div>
 
-          {/* Regional Preset Stations */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap gap-2">
             {REGIONAL_PRESETS.map((preset) => {
               const isActive = activePreset.id === preset.id;
               return (
                 <button
                   key={preset.id}
                   onClick={() => handleSelectPreset(preset)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow-sm border ${
+                  className={`px-4 py-2 rounded-xl text-body-md border transition ${
                     isActive
-                      ? "bg-primary text-on-primary border-primary font-semibold shadow"
-                      : "bg-surface-container-lowest text-on-surface border-surface-container-high hover:bg-surface-container-high"
+                      ? "bg-primary text-on-primary border-primary"
+                      : "bg-surface-container-lowest text-on-surface border-surface-container-high hover:border-outline-variant"
                   }`}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-on-tertiary-container"></span>
-                  <span>{preset.name}</span>
+                  {preset.name}
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* =======================================================================
-            SECTION 1: AI 3D OCEAN DIGITAL TWIN CANVAS (WebGL Interactive Volume)
-            ======================================================================= */}
-        <section id="digital-twin-3d" className="bg-surface-container-lowest p-space-lg rounded-xl shadow-sm border border-surface-container-high/60 flex flex-col gap-space-md">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-xs border-b border-surface-container-high/60 pb-space-xs">
-            <div>
-              <span className="font-label-technical text-label-technical uppercase tracking-wider text-secondary font-semibold block">
-                Interactive Decision-Support Layer
-              </span>
-              <h2 className="font-headline-md text-headline-md text-primary font-semibold">
-                AI 3D Ocean Digital Twin Cockpit
-              </h2>
-            </div>
-
-            {/* 3D Digital Twin Display Mode Selectors */}
-            <div className="flex items-center gap-1 bg-surface-container-low p-1 rounded-lg border border-surface-container-high/60 text-xs font-body-sm">
-              <button
-                onClick={() => setDigitalTwinMode("3d_volume")}
-                className={`px-3 py-1 rounded transition font-medium ${
-                  digitalTwinMode === "3d_volume" ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                }`}
-              >
-                3D Volumetric Mesh
-              </button>
-              <button
-                onClick={() => setDigitalTwinMode("horizontal_slice")}
-                className={`px-3 py-1 rounded transition font-medium ${
-                  digitalTwinMode === "horizontal_slice" ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                }`}
-              >
-                Horizontal Slice ({currentDepth}m)
-              </button>
-              <button
-                onClick={() => setDigitalTwinMode("vertical_transect")}
-                className={`px-3 py-1 rounded transition font-medium ${
-                  digitalTwinMode === "vertical_transect" ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                }`}
-              >
-                Vertical Transect (0-1000m)
-              </button>
-            </div>
-          </div>
-
-          {/* Interactive Plotly 3D Digital Twin Viewer */}
-          <div className="relative w-full h-[420px] bg-surface-container-low rounded-xl border border-surface-container-high/60 overflow-hidden flex items-center justify-center">
+        {/* 3D field */}
+        <Section
+          id="twin"
+          title="3D temperature field"
+          description="The reconstructed volume around the probe, from the surface to 1000 m."
+          actions={
+            <Segmented
+              value={digitalTwinMode}
+              onChange={setDigitalTwinMode}
+              options={[
+                { value: "3d_volume", label: "Volume" },
+                { value: "horizontal_slice", label: `Slice at ${currentDepth} m` },
+                { value: "vertical_transect", label: "Transect" }
+              ]}
+            />
+          }
+        >
+          <div className={`${card} h-[480px] overflow-hidden flex items-center justify-center`}>
             {typeof window !== "undefined" && plotly3DData.length > 0 ? (
               <Plot
                 data={plotly3DData}
                 layout={{
                   autosize: true,
-                  margin: { l: 20, r: 20, b: 20, t: 20 },
+                  margin: { l: 10, r: 10, b: 10, t: 10 },
                   scene: {
                     xaxis: { title: "Longitude (°E)", backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
                     yaxis: { title: "Latitude (°N)", backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
@@ -701,93 +684,66 @@ export default function OceanEmbedApp() {
                 }}
                 useResizeHandler={true}
                 className="w-full h-full"
-                config={{ responsive: true, displayModeBar: true, displaylogo: false }}
+                config={{ responsive: true, displayModeBar: false, displaylogo: false }}
               />
             ) : (
-              <div className="p-8 text-center text-xs font-mono text-secondary">
-                Initializing 3D WebGL Digital Twin Engine...
-              </div>
+              <span className="text-body-sm text-on-surface-variant">Loading 3D view…</span>
             )}
-
-            {/* Floating 3D Controls HUD */}
-            <div className="absolute top-3 left-3 bg-surface-container-lowest/90 backdrop-blur-md p-2 rounded-lg border border-surface-container-high/60 text-xs font-mono shadow-sm">
-              <span className="text-secondary font-bold uppercase block">3D Digital Twin Probe</span>
-              <span className="text-primary font-bold">{customCoord.lat.toFixed(2)}°N, {customCoord.lon.toFixed(2)}°E</span>
-              <span className="text-on-surface-variant block text-[10px]">Depth: 0m to 1000m</span>
-            </div>
           </div>
-        </section>
+        </Section>
 
-        {/* =======================================================================
-            SECTION 2: INTERACTIVE STORM TRACK TIME-SERIES SIMULATOR (Pillar 1 Focus)
-            ======================================================================= */}
-        <section className="bg-surface-container-lowest p-space-lg rounded-xl shadow-sm border border-surface-container-high/60 flex flex-col gap-space-md">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-xs border-b border-surface-container-high/60 pb-space-xs">
-            <div>
-              <span className="font-label-technical text-label-technical uppercase tracking-wider text-rose-600 font-semibold block">
-                Interactive Storm Track &amp; Thermal Exhaustion Simulator
-              </span>
-              <h2 className="font-headline-md text-headline-md text-primary font-semibold">
-                Tropical Cyclone Time-Series &amp; TCHP Depletion Player
-              </h2>
-            </div>
-
-            {/* Storm Selection Dropdown */}
-            <div className="flex items-center gap-space-xs">
-              <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase">Select Storm:</span>
-              <select
-                value={activeCycloneTrackId}
-                onChange={(e) => {
-                  setActiveCycloneTrackId(e.target.value);
-                  setCycloneStepIdx(0);
-                  setIsPlayingCyclone(false);
-                }}
-                className="bg-surface-container-low border border-surface-container-high rounded px-3 py-1 text-xs font-semibold text-primary"
+        {/* Cyclone replay */}
+        <Section
+          id="replay"
+          title="Cyclone replay"
+          description="Step through a past storm to see how much ocean heat it drew on and the cold wake it left."
+          actions={
+            <select
+              value={activeCycloneTrackId}
+              onChange={(e) => {
+                setActiveCycloneTrackId(e.target.value);
+                setCycloneStepIdx(0);
+                setIsPlayingCyclone(false);
+              }}
+              className="bg-surface-container-lowest border border-surface-container-high rounded-xl px-3 py-2 text-body-md text-primary"
+            >
+              <option value="amphan">Amphan, May 2020</option>
+              <option value="fani">Fani, May 2019</option>
+            </select>
+          }
+        >
+          <div className={`${card} p-6 sm:p-8 flex flex-col gap-8`}>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setIsPlayingCyclone(!isPlayingCyclone)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-secondary text-on-primary text-body-sm font-medium rounded-xl transition"
               >
-                <option value="amphan">Super Cyclone Amphan (May 2020)</option>
-                <option value="fani">Cyclone Fani (May 2019)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Time-Series Simulation Player Controls */}
-          <div className="bg-surface-container-low p-space-md rounded-xl border border-surface-container-high/60 flex flex-col gap-space-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm">
-              <div className="flex items-center gap-space-sm">
-                <button
-                  onClick={() => setIsPlayingCyclone(!isPlayingCyclone)}
-                  className="px-4 py-1.5 bg-primary hover:bg-secondary text-on-primary text-xs font-bold rounded-lg shadow-sm transition flex items-center gap-1.5"
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {isPlayingCyclone ? "pause" : "play_arrow"}
-                  </span>
-                  <span>{isPlayingCyclone ? "Pause Track" : "Play Storm Animation"}</span>
-                </button>
-
-                <button
-                  onClick={() => setCycloneStepIdx((prev) => Math.max(0, prev - 1))}
-                  disabled={cycloneStepIdx === 0}
-                  className="px-2.5 py-1.5 bg-surface-container-high hover:bg-surface-container text-primary text-xs rounded transition disabled:opacity-50"
-                >
-                  Prev Step
-                </button>
-
-                <button
-                  onClick={() => setCycloneStepIdx((prev) => Math.min(activeCyclone.steps.length - 1, prev + 1))}
-                  disabled={cycloneStepIdx === activeCyclone.steps.length - 1}
-                  className="px-2.5 py-1.5 bg-surface-container-high hover:bg-surface-container text-primary text-xs rounded transition disabled:opacity-50"
-                >
-                  Next Step
-                </button>
-              </div>
-
-              <div className="font-mono text-xs text-primary font-bold">
-                Step {cycloneStepIdx + 1} of {activeCyclone.steps.length}: <span className="text-rose-600">{currentCycloneStep.date}</span> [{currentCycloneStep.cat}]
+                <span className="material-symbols-outlined text-[18px]">{isPlayingCyclone ? "pause" : "play_arrow"}</span>
+                {isPlayingCyclone ? "Pause" : "Play"}
+              </button>
+              <button
+                onClick={() => setCycloneStepIdx((prev) => Math.max(0, prev - 1))}
+                disabled={cycloneStepIdx === 0}
+                className={ghostButton}
+                aria-label="Previous step"
+              >
+                <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+              </button>
+              <button
+                onClick={() => setCycloneStepIdx((prev) => Math.min(activeCyclone.steps.length - 1, prev + 1))}
+                disabled={cycloneStepIdx === activeCyclone.steps.length - 1}
+                className={ghostButton}
+                aria-label="Next step"
+              >
+                <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+              </button>
+              <div className="ml-auto text-right">
+                <div className="text-body-md font-medium text-primary">{currentCycloneStep.date}</div>
+                <div className="text-body-sm text-rose-600">{currentCycloneStep.cat}</div>
               </div>
             </div>
 
-            {/* Timeline Progress Slider */}
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-2">
               <input
                 type="range"
                 min="0"
@@ -795,398 +751,205 @@ export default function OceanEmbedApp() {
                 step="1"
                 value={cycloneStepIdx}
                 onChange={(e) => setCycloneStepIdx(parseInt(e.target.value))}
-                className="w-full accent-rose-600 h-2 bg-surface-container rounded-lg cursor-pointer"
+                className="w-full accent-rose-600 cursor-pointer"
               />
-              <div className="flex justify-between text-[10px] font-mono text-on-surface-variant">
+              <div className="flex justify-between text-body-sm text-on-surface-variant">
                 {activeCyclone.steps.map((s, i) => (
-                  <span key={i} className={i === cycloneStepIdx ? "text-rose-700 font-bold" : ""}>
-                    Step {s.step}: {s.date}
+                  <span key={i} className={i === cycloneStepIdx ? "text-rose-600 font-medium" : ""}>
+                    {s.date.split(" ").slice(0, 2).join(" ")}
                   </span>
                 ))}
               </div>
             </div>
 
-            {/* Step Explanation & Ocean Thermal Feedback Narrative */}
-            <div className="p-space-sm rounded bg-surface-container-lowest border border-surface-container-high/60 grid grid-cols-1 md:grid-cols-12 gap-space-sm items-center text-xs">
-              <div className="md:col-span-8">
-                <span className="font-bold text-primary block mb-0.5">Physical Ocean-Atmosphere Feedback:</span>
-                <p className="text-on-surface-variant leading-relaxed">{currentCycloneStep.narrative}</p>
-              </div>
-              <div className="md:col-span-4 bg-surface-container-low p-2 rounded font-mono text-[11px] space-y-1">
-                <div className="flex justify-between">
-                  <span>TCHP Reservoir:</span>
-                  <span className="font-bold text-rose-600">{currentCycloneStep.tchp} kJ/cm²</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Post-Storm Cold Wake:</span>
-                  <span className="font-bold text-secondary">{currentCycloneStep.coldWake}°C Drop</span>
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-6 border-t border-surface-container-high">
+              <p className="md:col-span-2 text-body-lg text-on-surface leading-relaxed">{currentCycloneStep.narrative}</p>
+              <div className="grid grid-cols-2 gap-6">
+                <Stat label="Heat potential" value={currentCycloneStep.tchp} unit="kJ/cm²" tone="text-rose-600" />
+                <Stat label="Cold wake" value={currentCycloneStep.coldWake} unit="°C" tone="text-secondary" />
               </div>
             </div>
           </div>
-        </section>
+        </Section>
 
-        {/* =======================================================================
-            TWO-COLUMN INTERACTIVE OCEAN COCKPIT (GIS Map & Telemetry)
-            ======================================================================= */}
-        <div id="interactive-map" className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
-          {/* LEFT COLUMN (7 Cols): SVG Marine Chart & 14-Channel Telemetry */}
-          <div className="lg:col-span-7 flex flex-col gap-space-md">
-            {/* Publication-Grade Synthetic Marine Chart with Click Probe */}
-            <div 
-              onClick={handleMapClick}
-              className="bg-surface-container relative rounded-xl overflow-hidden h-[460px] shadow-sm border border-surface-container-high/60 flex flex-col justify-between p-space-sm cursor-crosshair group"
-            >
-              {/* Telemetry HUD */}
-              <div className="z-10 flex items-center justify-between bg-surface-container-lowest/90 backdrop-blur-md px-space-md py-space-xs rounded-md shadow-sm border border-surface-container-high/40">
-                <div className="flex items-center gap-space-sm">
-                  <span className="font-caption-coordinate text-caption-coordinate text-secondary font-semibold uppercase">
-                    PROBE STN
-                  </span>
-                  <span className="font-label-technical text-label-technical text-primary font-mono font-medium">
-                    {customCoord.lat.toFixed(2)}° N, {customCoord.lon.toFixed(2)}° E [{activePreset.name}]
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-on-tertiary-container animate-ping"></span>
-                  <span className="font-caption-coordinate text-caption-coordinate text-secondary font-mono font-semibold">
-                    ACTIVE SATELLITE OVERPASS
-                  </span>
-                </div>
-              </div>
+        {/* Probe: map + vertical profile */}
+        <Section
+          id="probe"
+          title={activePreset.name}
+          description={activePreset.context}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div className="lg:col-span-7 flex flex-col gap-8">
+              <div className={`${card} overflow-hidden`}>
+                <div onClick={handleMapClick} className="relative h-[420px] cursor-crosshair">
+                  <svg className="absolute inset-0 w-full h-full" viewBox="0 0 800 540" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect fill="#EAF5FF" height="540" width="800"></rect>
 
-              {/* Synthetic Marine Vector Graphic */}
-              <div className="absolute inset-0 w-full h-full">
-                <svg className="w-full h-full object-cover" viewBox="0 0 800 540" xmlns="http://www.w3.org/2000/svg">
-                  <rect fill="#EAF5FF" height="540" width="800"></rect>
+                    {/* Bathymetric isobars */}
+                    <path d="M 0,220 Q 200,210 380,240 T 700,220 L 800,240 L 800,540 L 0,540 Z" fill="#D3EBFF" opacity="0.6"></path>
+                    <path d="M 0,310 Q 240,290 440,330 T 800,310 L 800,540 L 0,540 Z" fill="#C7E7FE" opacity="0.65"></path>
+                    <path d="M 0,400 Q 280,380 500,420 T 800,390 L 800,540 L 0,540 Z" fill="#79D1FB" opacity="0.3"></path>
 
-                  {/* Bathymetric Isobars */}
-                  <path d="M 0,220 Q 200,210 380,240 T 700,220 L 800,240 L 800,540 L 0,540 Z" fill="#D3EBFF" opacity="0.6"></path>
-                  <path d="M 0,310 Q 240,290 440,330 T 800,310 L 800,540 L 0,540 Z" fill="#C7E7FE" opacity="0.65"></path>
-                  <path d="M 0,400 Q 280,380 500,420 T 800,390 L 800,540 L 0,540 Z" fill="#79D1FB" opacity="0.3"></path>
+                    {/* Coastlines */}
+                    <path d="M 0,0 L 220,0 Q 210,120 180,190 T 130,340 Q 110,420 80,480 L 0,520 Z" fill="#DFF0FF" stroke="#72787E" strokeWidth="1.2"></path>
+                    <ellipse cx="145" cy="460" fill="#DFF0FF" rx="22" ry="34" stroke="#72787E" strokeWidth="1.2"></ellipse>
+                    <path d="M 660,0 Q 640,110 650,220 T 680,390 Q 720,480 800,520 L 800,0 Z" fill="#DFF0FF" stroke="#72787E" strokeWidth="1.2"></path>
 
-                  {/* Coastline Margins */}
-                  <path d="M 0,0 L 220,0 Q 210,120 180,190 T 130,340 Q 110,420 80,480 L 0,520 Z" fill="#DFF0FF" stroke="#72787E" strokeWidth="1.2"></path>
-                  <ellipse cx="145" cy="460" fill="#DFF0FF" rx="22" ry="34" stroke="#72787E" strokeWidth="1.2"></ellipse>
-                  <path d="M 660,0 Q 640,110 650,220 T 680,390 Q 720,480 800,520 L 800,0 Z" fill="#DFF0FF" stroke="#72787E" strokeWidth="1.2"></path>
+                    {(() => {
+                      const probeX = ((customCoord.lon - 45.0) / (105.0 - 45.0)) * 800;
+                      const probeY = ((30.0 - customCoord.lat) / (30.0 - 5.0)) * 540;
+                      const accent = threatSimMode ? "#EF4444" : "#00B1C9";
 
-                  {/* Dynamic GIS Map Threat & Telemetry Overlays */}
-                  {(() => {
-                    const probeX = ((customCoord.lon - 45.0) / (105.0 - 45.0)) * 800;
-                    const probeY = ((30.0 - customCoord.lat) / (30.0 - 5.0)) * 540;
+                      return (
+                        <>
+                          {threatSimMode ? (
+                            <g>
+                              {/* Heat reservoir and projected storm track */}
+                              <circle cx={probeX} cy={probeY} fill="#DC2626" fillOpacity="0.12" r="110" />
+                              <circle cx={probeX} cy={probeY} fill="#EF4444" fillOpacity="0.2" r="70" />
+                              <circle cx={probeX} cy={probeY} r="70" stroke="#DC2626" strokeDasharray="6 3" strokeWidth="1.5" fill="none" opacity="0.8" />
+                              <path
+                                d={`M ${probeX - 15},${probeY + 10} L ${probeX - 210},${probeY - 130} L ${probeX - 120},${probeY - 180} Z`}
+                                fill="#EF4444"
+                                fillOpacity="0.1"
+                                stroke="#F87171"
+                                strokeDasharray="4 2"
+                                strokeWidth="1"
+                              />
+                              <path
+                                d={`M ${probeX},${probeY} Q ${probeX - 80},${probeY - 70} ${probeX - 160},${probeY - 150}`}
+                                fill="none"
+                                stroke="#DC2626"
+                                strokeWidth="3"
+                                strokeDasharray="6 3"
+                              />
+                              <g transform={`translate(${probeX - 160}, ${probeY - 150})`}>
+                                <circle r="9" fill="#991B1B" stroke="#FFFFFF" strokeWidth="2" />
+                                <text fill="#991B1B" fontFamily="Geist" fontSize="13" fontWeight="600" x="16" y="5">
+                                  Cat 5 · TCHP {tchp.toFixed(0)} kJ/cm²
+                                </text>
+                              </g>
 
-                    return (
-                      <>
-                        {threatSimMode ? (
-                          <g>
-                            {/* 1. TCHP Thermal Heat Reservoir & Cyclone Rapid Intensification Track Cone on Map */}
-                            <circle cx={probeX} cy={probeY} fill="#DC2626" fillOpacity="0.18" r="110" className="animate-pulse" />
-                            <circle cx={probeX} cy={probeY} fill="#EF4444" fillOpacity="0.25" r="75" />
-                            <circle cx={probeX} cy={probeY} fill="#B91C1C" fillOpacity="0.35" r="45" />
-                            <circle cx={probeX} cy={probeY} r="75" stroke="#DC2626" strokeDasharray="6 3" strokeWidth="2" opacity="0.85" />
-                            
-                            {/* Projected Rapid Intensification Cyclone Track Line */}
-                            <path
-                              d={`M ${probeX},${probeY} Q ${probeX - 80},${probeY - 70} ${probeX - 160},${probeY - 150}`}
-                              fill="none"
-                              stroke="#DC2626"
-                              strokeWidth="3.5"
-                              strokeDasharray="6 3"
-                            />
-
-                            {/* Cyclone Track Expansion Uncertainty Cone */}
-                            <path
-                              d={`M ${probeX - 15},${probeY + 10} L ${probeX - 210},${probeY - 130} L ${probeX - 120},${probeY - 180} Z`}
-                              fill="#EF4444"
-                              fillOpacity="0.15"
-                              stroke="#F87171"
-                              strokeDasharray="4 2"
-                              strokeWidth="1.2"
-                            />
-
-                            {/* Category 5 Super Cyclone Eye Marker & Badge on Map */}
-                            <g transform={`translate(${probeX - 160}, ${probeY - 150})`}>
-                              <circle cx="0" cy="0" r="18" fill="#DC2626" fillOpacity="0.3" className="animate-ping" />
-                              <circle cx="0" cy="0" r="10" fill="#991B1B" stroke="#FFFFFF" strokeWidth="2" />
-                              <path d="M -5,0 Q 0,-6 5,0 Q 0,6 -5,0 Z" fill="#FFFFFF" />
-                              <rect x="14" y="-12" width="220" height="24" rx="4" fill="#991B1B" fillOpacity="0.9" />
-                              <text fill="#FFFFFF" fontFamily="Geist" fontSize="10" fontWeight="bold" x="22" y="4">
-                                🚨 CAT 5 CYCLONE (TCHP: {(prediction?.derived_pillars?.cyclone?.tchp_kj_cm2 ?? 108).toFixed(1)} kJ/cm²)
-                              </text>
+                              {/* Submarine contact in the shadow zone */}
+                              <g transform={`translate(${probeX + 60}, ${probeY + 50})`}>
+                                <circle r="36" fill="#A855F7" fillOpacity="0.15" stroke="#7E22CE" strokeDasharray="3 3" strokeWidth="1.2" />
+                                <ellipse rx="15" ry="5.5" fill="#6B21A8" stroke="#FFFFFF" strokeWidth="1.5" />
+                                <text fill="#6B21A8" fontFamily="Geist" fontSize="13" fontWeight="600" x="44" y="5">
+                                  Contact at {shadowStart}–{shadowEnd} m
+                                </text>
+                              </g>
                             </g>
-
-                            {/* 2. Tactical Submarine Hostile Contact & ASW Acoustic Shadow Zone on GIS Map */}
-                            <g transform={`translate(${probeX + 45}, ${probeY + 30})`}>
-                              {/* Acoustic Sonar Wave Refraction Pulsing Rings */}
-                              <circle cx="0" cy="0" r="60" stroke="#9333EA" strokeDasharray="4 2" strokeWidth="1.5" fill="none" opacity="0.8" className="animate-ping" />
-                              <circle cx="0" cy="0" r="40" fill="#A855F7" fillOpacity="0.2" stroke="#7E22CE" strokeDasharray="3 3" strokeWidth="1.5" />
-                              
-                              {/* Submarine Stealth Graphic */}
-                              <ellipse cx="0" cy="0" rx="16" ry="6" fill="#6B21A8" stroke="#FFFFFF" strokeWidth="1.5" />
-                              <rect x="-3" y="-10" width="5" height="5" fill="#FFFFFF" />
-                              
-                              {/* Submarine Tactical Contact Map Badge */}
-                              <rect x="22" y="-12" width="245" height="24" rx="4" fill="#6B21A8" fillOpacity="0.9" />
-                              <text fill="#FFFFFF" fontFamily="Geist" fontSize="9" fontWeight="bold" x="28" y="4">
-                                ⚠️ HOSTILE SUB IN SHADOW ({prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.start_depth_m ?? 75}m–{prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.end_depth_m ?? 150}m)
-                              </text>
+                          ) : (
+                            <g>
+                              <circle cx={probeX} cy={probeY} fill="#FFDAD6" fillOpacity="0.4" r="45" />
+                              <circle cx={probeX} cy={probeY} r="45" stroke="#EA580C" strokeDasharray="5 3" strokeWidth="1" fill="none" opacity="0.6" />
+                              <line opacity="0.5" stroke="#00B1C9" strokeDasharray="6 4" strokeWidth="1.5" x1="280" x2="520" y1="0" y2="540" />
                             </g>
+                          )}
+
+                          {/* Probe reticle */}
+                          <g transform={`translate(${probeX}, ${probeY})`}>
+                            <line stroke={accent} strokeWidth="2" x1="-18" x2="18" y1="0" y2="0" />
+                            <line stroke={accent} strokeWidth="2" x1="0" x2="0" y1="-18" y2="18" />
+                            <circle r="12" fill="none" stroke={accent} strokeWidth="1.8" />
                           </g>
-                        ) : (
-                          /* Standard Non-Threat Satellite Mode Overlays */
-                          <g>
-                            {/* Warm-Core Anticyclonic Eddy */}
-                            <g transform={`translate(${probeX}, ${probeY})`}>
-                              <circle cx="0" cy="0" fill="#FFF7ED" fillOpacity="0.35" r="70" />
-                              <circle cx="0" cy="0" fill="#FFDAD6" fillOpacity="0.4" r="45" />
-                              <circle cx="0" cy="0" opacity="0.7" r="45" stroke="#EA580C" strokeDasharray="5 3" strokeWidth="1" />
-                            </g>
+                        </>
+                      );
+                    })()}
+                  </svg>
+                </div>
 
-                            {/* Standard Satellite Track */}
-                            <line opacity="0.7" stroke="#00B1C9" strokeDasharray="6 4" strokeWidth="1.6" x1="280" x2="520" y1="0" y2="540" />
-                          </g>
-                        )}
-
-                        {/* Active Crosshair Reticle for Dynamic Probe Location */}
-                        <g transform={`translate(${probeX}, ${probeY})`}>
-                          <line stroke={threatSimMode ? "#EF4444" : "#00B1C9"} strokeWidth="2" x1="-18" x2="18" y1="0" y2="0" />
-                          <line stroke={threatSimMode ? "#EF4444" : "#00B1C9"} strokeWidth="2" x1="0" x2="0" y1="-18" y2="18" />
-                          <circle cx="0" cy="0" fill="none" r="14" stroke={threatSimMode ? "#EF4444" : "#00B1C9"} strokeWidth="1.8" />
-                          <text fill={threatSimMode ? "#991B1B" : "#006686"} fontFamily="Geist" fontSize="9" fontWeight="bold" x="18" y="18">
-                            {threatSimMode ? "THREAT PROBE" : "PROBE LOCATION"}
-                          </text>
-                        </g>
-                      </>
-                    );
-                  })()}
-                </svg>
+                <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 border-t border-surface-container-high text-body-sm text-on-surface-variant">
+                  <span className="font-mono text-primary">
+                    {customCoord.lat.toFixed(2)}°N, {customCoord.lon.toFixed(2)}°E
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span>12 °C</span>
+                    <div className="w-24 h-2 rounded-full bg-gradient-to-r from-[#003E47] via-[#00B1C9] via-[#FFF7ED] to-[#EA580C]"></div>
+                    <span>31 °C</span>
+                  </div>
+                </div>
               </div>
 
-              {/* Bottom Marine Chart Legend */}
-              <div className="z-10 mt-auto flex flex-wrap items-center justify-between gap-space-sm bg-surface-container-lowest/90 backdrop-blur-md p-space-sm rounded-md shadow-sm border border-surface-container-high/40">
-                <div className="flex items-center gap-space-sm">
-                  <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant font-mono">12°C</span>
-                  <div className="w-28 h-2.5 rounded bg-gradient-to-r from-[#003E47] via-[#00B1C9] via-[#FFF7ED] to-[#EA580C]"></div>
-                  <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant font-mono">31°C</span>
+              {/* Surface inputs */}
+              <div className="flex flex-col gap-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-headline-sm text-headline-sm text-primary">Surface inputs</h3>
+                  <button onClick={() => setShowChannelDrawer(!showChannelDrawer)} className="inline-flex items-center gap-1 text-body-sm font-medium text-secondary hover:text-primary">
+                    <span className="material-symbols-outlined text-[18px]">{showChannelDrawer ? "check" : "tune"}</span>
+                    {showChannelDrawer ? "Done" : "Edit"}
+                  </button>
                 </div>
-                <div className="flex items-center gap-space-md font-caption-coordinate text-caption-coordinate text-primary">
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-on-tertiary-container"></span> INCOIS Argo
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-0.5 bg-error"></span> Storm Track
-                  </span>
-                  <span className="font-mono text-secondary">RES: 0.25° • CLICK TO PROBE</span>
-                </div>
+
+                {showChannelDrawer ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-4">
+                    {inputFields.map((field) => (
+                      <label key={field.key} className="flex flex-col gap-1.5">
+                        <span className="text-body-sm text-on-surface-variant">
+                          {field.label} ({field.unit})
+                        </span>
+                        <input
+                          type="number"
+                          step={field.step}
+                          value={params[field.key]}
+                          onChange={(e) => handleParamChange(field.key, e.target.value)}
+                          className="w-full bg-surface-container-lowest border border-surface-container-high rounded-xl px-3 py-2 text-body-md font-mono text-primary focus:outline-none focus:border-secondary"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+                    <Stat label="Sea surface temp" value={params.sst.toFixed(1)} unit="°C" />
+                    <Stat label="Surface height" value={`${params.ssh > 0 ? "+" : ""}${params.ssh.toFixed(2)}`} unit="m" />
+                    <Stat label="Salinity anomaly" value={`${params.sss > 0 ? "+" : ""}${params.sss.toFixed(2)}`} unit="PSU" />
+                    <Stat label="Wind" value={Math.hypot(params.u10, params.v10).toFixed(1)} unit="m/s" />
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* 14-Channel Satellite Input Panel */}
-            <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-surface-container-high/60">
-              <div className="flex items-center justify-between mb-space-sm">
-                <div className="flex items-center gap-space-xs">
-                  <span className="font-label-technical text-label-technical uppercase tracking-wider text-primary font-semibold">
-                    14-Channel Satellite Telemetry Patch
-                  </span>
-                  <span className="text-[10px] text-on-surface-variant font-mono">(7 Physical Vars + 7 Binary Masks)</span>
-                </div>
-                <button
-                  onClick={() => setShowChannelDrawer(!showChannelDrawer)}
-                  className="text-xs text-secondary hover:text-primary font-medium flex items-center gap-1"
-                >
-                  <span>{showChannelDrawer ? "Collapse Controls" : "Edit Channels"}</span>
-                  <span className="material-symbols-outlined text-[16px]">
-                    {showChannelDrawer ? "expand_less" : "tune"}
-                  </span>
-                </button>
-              </div>
-
-              {/* Minimalist Channel Overview Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-                <div className="bg-surface-container-low p-2 rounded border border-surface-container-high/40">
-                  <span className="text-[10px] text-on-surface-variant uppercase block">Ch 0 &amp; 1: SST</span>
-                  <span className="text-sm font-bold text-primary">{params.sst.toFixed(1)} °C</span>
-                </div>
-                <div className="bg-surface-container-low p-2 rounded border border-surface-container-high/40">
-                  <span className="text-[10px] text-on-surface-variant uppercase block">Ch 2 &amp; 3: SSH</span>
-                  <span className="text-sm font-bold text-primary">{params.ssh > 0 ? `+${params.ssh.toFixed(2)}` : params.ssh.toFixed(2)} m</span>
-                </div>
-                <div className="bg-surface-container-low p-2 rounded border border-surface-container-high/40">
-                  <span className="text-[10px] text-on-surface-variant uppercase block">Ch 4 &amp; 5: SSS</span>
-                  <span className="text-sm font-bold text-primary">{params.sss > 0 ? `+${params.sss.toFixed(2)}` : params.sss.toFixed(2)} PSU</span>
-                </div>
-                <div className="bg-surface-container-low p-2 rounded border border-surface-container-high/40">
-                  <span className="text-[10px] text-on-surface-variant uppercase block">Ch 6–9: Currents</span>
-                  <span className="text-sm font-bold text-primary">U:{params.uo.toFixed(2)} V:{params.vo.toFixed(2)} m/s</span>
-                </div>
-              </div>
-
-              {/* Detailed Slider Inputs */}
-              {showChannelDrawer && (
-                <div className="mt-space-md pt-space-sm border-t border-surface-container-high/40 grid grid-cols-2 sm:grid-cols-4 gap-space-md">
-                  <div>
-                    <label className="text-[10px] font-mono text-on-surface-variant block mb-1">
-                      SST (°C) [Ch 0/1]
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={params.sst}
-                      onChange={(e) => handleParamChange("sst", e.target.value)}
-                      className="w-full bg-surface-container-low border border-surface-container-high rounded px-2 py-1 text-xs font-mono text-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-on-surface-variant block mb-1">
-                      SSH (m) [Ch 2/3]
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={params.ssh}
-                      onChange={(e) => handleParamChange("ssh", e.target.value)}
-                      className="w-full bg-surface-container-low border border-surface-container-high rounded px-2 py-1 text-xs font-mono text-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-on-surface-variant block mb-1">
-                      SSS (PSU) [Ch 4/5]
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={params.sss}
-                      onChange={(e) => handleParamChange("sss", e.target.value)}
-                      className="w-full bg-surface-container-low border border-surface-container-high rounded px-2 py-1 text-xs font-mono text-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-on-surface-variant block mb-1">
-                      Uo Current (m/s)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={params.uo}
-                      onChange={(e) => handleParamChange("uo", e.target.value)}
-                      className="w-full bg-surface-container-low border border-surface-container-high rounded px-2 py-1 text-xs font-mono text-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-on-surface-variant block mb-1">
-                      Vo Current (m/s)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={params.vo}
-                      onChange={(e) => handleParamChange("vo", e.target.value)}
-                      className="w-full bg-surface-container-low border border-surface-container-high rounded px-2 py-1 text-xs font-mono text-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-on-surface-variant block mb-1">
-                      U10 Wind (m/s)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={params.u10}
-                      onChange={(e) => handleParamChange("u10", e.target.value)}
-                      className="w-full bg-surface-container-low border border-surface-container-high rounded px-2 py-1 text-xs font-mono text-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-on-surface-variant block mb-1">
-                      V10 Wind (m/s)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={params.v10}
-                      onChange={(e) => handleParamChange("v10", e.target.value)}
-                      className="w-full bg-surface-container-low border border-surface-container-high rounded px-2 py-1 text-xs font-mono text-primary"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      onClick={() => runPrediction(params, customCoord.lat, customCoord.lon)}
-                      disabled={loading}
-                      className="w-full py-1.5 bg-secondary hover:bg-primary text-on-primary text-xs font-semibold rounded transition"
-                    >
-                      {loading ? "Computing..." : "Update Model"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* RIGHT COLUMN (5 Cols): 15-Depth Selector, Probe & Vertical Sounding */}
-          <div className="lg:col-span-5 flex flex-col gap-space-md">
-            {/* 15-Level Isobaric Stratum Selector */}
-            <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-surface-container-high/60">
-              <div className="flex items-center justify-between mb-space-sm">
-                <span className="font-label-technical text-label-technical uppercase tracking-wider text-primary font-semibold">
-                  15 Isobaric Stratum Depths
-                </span>
-                <span className="font-caption-coordinate text-caption-coordinate font-mono text-secondary font-bold">
-                  {currentDepth} METERS SELECTED
-                </span>
-              </div>
-
-              <div className="grid grid-cols-5 gap-1.5">
-                {DEPTH_LEVELS.map((depth, idx) => {
-                  const isSel = selectedDepthIdx === idx;
-                  return (
-                    <button
-                      key={depth}
-                      onClick={() => setSelectedDepthIdx(idx)}
-                      className={`py-1.5 px-1 text-center font-caption-coordinate text-caption-coordinate rounded transition ${
-                        isSel
-                          ? "bg-primary text-on-primary font-bold shadow-sm"
-                          : "bg-surface-container-low text-on-surface hover:bg-surface-container-high"
-                      }`}
-                    >
-                      {depth}m
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Live Subsurface Temperature Readout */}
-            <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-surface-container-high/60 flex flex-col gap-space-sm">
-              <div className="flex items-baseline justify-between">
+            {/* Vertical profile */}
+            <div className={`lg:col-span-5 ${card} p-6 sm:p-7 flex flex-col gap-7`}>
+              <div className="flex items-start justify-between gap-4">
                 <div>
-                  <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant block uppercase">
-                    Model Predicted Temp at {currentDepth}m
-                  </span>
-                  <div className="flex items-baseline gap-1">
-                    <span className="font-display text-display font-bold text-primary">
-                      {currentTemp.toFixed(1)}
-                    </span>
-                    <span className="font-headline-sm text-headline-sm text-secondary font-semibold">°C</span>
+                  <span className="text-body-sm text-on-surface-variant">Temperature at {currentDepth} m</span>
+                  <div className="flex items-baseline gap-1 mt-1">
+                    <span className="font-display text-display text-primary">{currentTemp.toFixed(1)}</span>
+                    <span className="font-headline-sm text-headline-sm text-secondary">°C</span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant block uppercase">
-                    Thermocline State
-                  </span>
-                  <span className="inline-flex items-center px-space-sm py-space-2xs rounded bg-[#FFF7ED] text-[#EA580C] font-label-technical text-label-technical font-semibold">
-                    {currentDepth <= 50 ? "Mixed Layer" : currentDepth <= 200 ? "Thermocline" : "Deep Abyssal"}
-                  </span>
-                </div>
+                <span className="mt-1 px-2.5 py-1 rounded-lg bg-[#FFF7ED] text-[#EA580C] text-body-sm font-medium">
+                  {layerName}
+                </span>
               </div>
 
-              {/* Vertical Temperature Sounding SVG Curve */}
-              <div className="bg-surface-container-low/60 p-space-sm rounded-lg border border-surface-container-high/40">
-                <div className="flex items-center justify-between text-[10px] text-on-surface-variant font-mono mb-1">
-                  <span>VERTICAL TEMPERATURE SOUNDING</span>
-                  <span>3°C — 32°C</span>
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-between text-body-sm">
+                  <span className="text-on-surface-variant">Depth</span>
+                  <span className="font-mono text-primary">{currentDepth} m</span>
                 </div>
-                <svg className="w-full h-28" viewBox="0 0 300 120" preserveAspectRatio="none">
-                  <path d={curvePathD} fill="none" stroke="#00B1C9" strokeWidth="2.5" strokeLinecap="round" />
+                <input
+                  type="range"
+                  min="0"
+                  max={DEPTH_LEVELS.length - 1}
+                  step="1"
+                  value={selectedDepthIdx}
+                  onChange={(e) => setSelectedDepthIdx(Number(e.target.value))}
+                  className="w-full accent-primary cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-body-sm text-on-surface-variant mb-2">
+                  <span>Profile</span>
+                  <span>3 – 32 °C</span>
+                </div>
+                <svg className="w-full h-64" viewBox="0 0 300 230" preserveAspectRatio="none">
+                  <line x1="20" y1="20" x2="280" y2="20" stroke="#D3EBFF" strokeWidth="1" />
+                  <line x1="20" y1="115" x2="280" y2="115" stroke="#D3EBFF" strokeDasharray="3 3" strokeWidth="1" />
+                  <line x1="20" y1="210" x2="280" y2="210" stroke="#D3EBFF" strokeWidth="1" />
+                  <path d={curvePathD} fill="none" stroke="#00B1C9" strokeWidth="2.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
                   {curvePoints.map((pt) => {
                     const isSel = selectedDepthIdx === pt.idx;
                     return (
@@ -1194,1118 +957,493 @@ export default function OceanEmbedApp() {
                         key={pt.depth}
                         cx={pt.x}
                         cy={pt.y}
-                        r={isSel ? 5 : 2.5}
-                        fill={isSel ? "#00B1C9" : "#00253D"}
+                        r={isSel ? 5.5 : 3}
+                        fill={isSel ? "#EA580C" : "#00253D"}
                         stroke="#ffffff"
-                        strokeWidth="1"
-                        className="cursor-pointer transition-transform hover:scale-125"
+                        strokeWidth="1.5"
+                        className="cursor-pointer"
                         onClick={() => setSelectedDepthIdx(pt.idx)}
-                      />
+                      >
+                        <title>{`${pt.depth} m · ${pt.temp} °C`}</title>
+                      </circle>
                     );
                   })}
                 </svg>
-                <div className="flex justify-between items-center text-[10px] text-on-surface-variant font-mono pt-1 border-t border-surface-container-high/30">
-                  <span>Surface 0m: {surfaceTemp.toFixed(1)}°C</span>
-                  <span>100m: {thermoclineTemp.toFixed(1)}°C</span>
-                  <span>1000m: {abyssalTemp.toFixed(1)}°C</span>
-                </div>
               </div>
-            </div>
 
-            {/* Preset Station Context Card */}
-            <div className="bg-surface-container-low p-space-md rounded-xl border border-surface-container-high/60 text-xs">
-              <span className="font-caption-coordinate text-caption-coordinate text-secondary uppercase font-semibold block mb-1">
-                Regional Oceanographic Context
-              </span>
-              <p className="text-on-surface-variant">{activePreset.context}</p>
+              <div className="grid grid-cols-3 pt-5 border-t border-surface-container-high">
+                <Stat label="Surface" value={surfaceTemp.toFixed(1)} unit="°C" />
+                <Stat label="100 m" value={thermoclineTemp.toFixed(1)} unit="°C" />
+                <Stat label="1000 m" value={abyssalTemp.toFixed(1)} unit="°C" />
+              </div>
             </div>
           </div>
-        </div>
+        </Section>
 
-        {/* =======================================================================
-            THE 4 CORE APPLICATION PILLARS & TACTICAL THREAT SIMULATION
-            ======================================================================= */}
-        <section id="pillars" className="flex flex-col gap-space-md">
-          
-          {/* Tactical Defense & Threat Simulation Control Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm bg-surface-container-lowest p-space-md rounded-xl border border-surface-container-high/60 shadow-sm">
-            <div className="flex items-center gap-space-sm">
-              <span className={`material-symbols-outlined text-[26px] ${threatSimMode ? "text-rose-600 animate-pulse" : "text-primary"}`}>
-                {threatSimMode ? "warning" : "shield"}
-              </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-label-technical text-label-technical uppercase tracking-wider text-primary font-bold">
-                    Tactical Defense &amp; Extreme Hazard Simulator
-                  </span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                    threatSimMode ? "bg-rose-600 text-white animate-pulse" : "bg-emerald-100 text-emerald-800"
-                  }`}>
-                    {threatSimMode ? "🔴 SUBMARINE THREAT SIMULATION ACTIVE" : "🟢 REAL-TIME LIVE SATELLITE DATA"}
-                  </span>
-                </div>
-                <p className="text-xs text-on-surface-variant">
-                  {threatSimMode
-                    ? "Simulating tactical submarine concealment in thermocline sonar shadow corridor & Category 5 storm risk."
-                    : "Displaying real live ocean predictions. Click button to simulate tactical submarine contact or storm hazards."}
-                </p>
-              </div>
-            </div>
-
+        {/* Insights */}
+        <Section
+          id="insights"
+          title="What the profile tells us"
+          description="Quantities derived from the predicted temperature profile at the probe."
+          actions={
             <button
               onClick={handleThreatSimToggle}
-              className={`px-4 py-2 rounded-lg text-xs font-semibold font-mono flex items-center gap-2 transition shadow-sm self-start sm:self-auto ${
+              className={
                 threatSimMode
-                  ? "bg-rose-600 hover:bg-rose-700 text-white"
-                  : "bg-surface-container-high hover:bg-surface-container text-primary border border-surface-container-high/60"
-              }`}
+                  ? "inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-body-sm font-medium bg-rose-600 hover:bg-rose-700 text-white transition"
+                  : ghostButton
+              }
             >
-              <span className="material-symbols-outlined text-[18px]">
-                {threatSimMode ? "cancel" : "radar"}
-              </span>
-              <span>{threatSimMode ? "Exit Threat Mode" : "Simulate Submarine & Storm Threat"}</span>
+              <span className="material-symbols-outlined text-[18px]">{threatSimMode ? "close" : "radar"}</span>
+              {threatSimMode ? "End threat scenario" : "Run threat scenario"}
             </button>
+          }
+        >
+          {threatSimMode && (
+            <div className="px-5 py-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-body-md">
+              Threat scenario is on. Surface inputs are set to extreme values (SST 31.8 °C, winds near 34 m/s), so the
+              numbers below describe a simulated storm and submarine contact, not live conditions.
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {insightTabs.map((tab) => {
+              const isActive = activePillarTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActivePillarTab(tab.id)}
+                  className={`text-left p-5 rounded-xl border bg-surface-container-lowest transition ${
+                    isActive ? "border-primary ring-1 ring-primary" : "border-surface-container-high hover:border-outline-variant"
+                  }`}
+                >
+                  <div className={`flex items-center gap-2 text-body-md font-medium ${tab.accent}`}>
+                    <span className="material-symbols-outlined text-[20px]">{tab.icon}</span>
+                    {tab.name}
+                  </div>
+                  <div className="mt-4 font-data-metric text-data-metric text-primary">{tab.metric}</div>
+                  <p className="mt-1 text-body-sm text-on-surface-variant">{tab.caption}</p>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-space-xs">
-            <div>
-              <span className="font-label-technical text-label-technical uppercase tracking-wider text-secondary font-semibold block">
-                Derived Oceanographic Physics
-              </span>
-              <h2 className="font-headline-lg text-headline-lg text-primary tracking-tight font-semibold">
-                The 4 Core Application Pillars
-              </h2>
-            </div>
-            {/* Pillar Tab Controls */}
-            <div className="flex items-center gap-1 font-body-sm text-xs bg-surface-container-low p-1 rounded-lg border border-surface-container-high/60">
-              <button
-                onClick={() => setActivePillarTab("cyclone")}
-                className={`px-3 py-1 rounded-md transition font-medium ${
-                  activePillarTab === "cyclone" ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                }`}
-              >
-                1. Cyclone Warning
-              </button>
-              <button
-                onClick={() => setActivePillarTab("asw")}
-                className={`px-3 py-1 rounded-md transition font-medium ${
-                  activePillarTab === "asw" ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                }`}
-              >
-                2. ASW Defense
-              </button>
-              <button
-                onClick={() => setActivePillarTab("fisheries")}
-                className={`px-3 py-1 rounded-md transition font-medium ${
-                  activePillarTab === "fisheries" ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                }`}
-              >
-                3. PFZ Fisheries
-              </button>
-              <button
-                onClick={() => setActivePillarTab("volume")}
-                className={`px-3 py-1 rounded-md transition font-medium ${
-                  activePillarTab === "volume" ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                }`}
-              >
-                4. 3D Ocean Volume
-              </button>
-            </div>
-          </div>
-
-          {/* 4 Summary Cards (100% Dynamic & Threat Sim Compatible) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-space-md">
-            {/* PILLAR 1: Cyclone TCHP & D26 */}
-            <div className="bg-surface-container-lowest rounded-xl p-space-lg shadow-sm border-t-4 border-t-rose-500 border border-surface-container-high/60 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-space-sm">
-                  <div className="flex items-center gap-1.5 text-rose-600">
-                    <span className="material-symbols-outlined text-[20px]">air</span>
-                    <span className="font-label-technical text-label-technical uppercase font-bold">Pillar 1</span>
-                  </div>
-                  <span className="font-caption-coordinate text-caption-coordinate text-rose-600 font-mono font-bold">
-                    D₂₆ &amp; TCHP
-                  </span>
-                </div>
-                <h3 className="font-headline-sm text-headline-sm text-primary mb-1">Cyclone Heat Potential</h3>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-space-md">
-                  Thermal energy stored above 26°C isotherm fueling storm rapid intensification.
-                </p>
-                <div className="space-y-1.5 bg-surface-container-low p-space-sm rounded font-mono text-xs mb-space-sm">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">D₂₆ Depth:</span>
-                    <span className="font-bold text-primary">
-                      {(prediction?.derived_pillars?.cyclone?.d26_depth_m ?? 34.6).toFixed(1)} m
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">TCHP Energy:</span>
-                    <span className="font-bold text-rose-600">
-                      {(prediction?.derived_pillars?.cyclone?.tchp_kj_cm2 ?? 3.82).toFixed(2)} kJ/cm²
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-[11px] font-medium text-rose-700">
-                {threatSimMode
-                  ? "🚨 Category 5 Super Cyclone Threat"
-                  : (prediction?.derived_pillars?.cyclone?.risk_category ?? "Low Risk (Stable Warm Upper Layer)")}
-              </div>
-            </div>
-
-            {/* PILLAR 2: ASW Thermocline Sonar Shadow Zone */}
-            <div className="bg-surface-container-lowest rounded-xl p-space-lg shadow-sm border-t-4 border-t-purple-500 border border-surface-container-high/60 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-space-sm">
-                  <div className="flex items-center gap-1.5 text-purple-600">
-                    <span className="material-symbols-outlined text-[20px]">shield</span>
-                    <span className="font-label-technical text-label-technical uppercase font-bold">Pillar 2</span>
-                  </div>
-                  <span className="font-caption-coordinate text-caption-coordinate text-purple-600 font-mono font-bold">
-                    ASW DEFENSE
-                  </span>
-                </div>
-                <h3 className="font-headline-sm text-headline-sm text-primary mb-1">Acoustic Sonar Shadow</h3>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-space-md">
-                  Thermocline density gradient ∂T/∂z that refracts sonar waves for submarine concealment.
-                </p>
-                <div className="space-y-1.5 bg-surface-container-low p-space-sm rounded font-mono text-xs mb-space-sm">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Core Depth:</span>
-                    <span className="font-bold text-primary">
-                      {prediction?.derived_pillars?.asw_defense?.thermocline_core_depth_m ?? 75} m
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Max Gradient:</span>
-                    <span className="font-bold text-purple-600">
-                      {(prediction?.derived_pillars?.asw_defense?.max_thermal_gradient_c_per_m ?? -0.176).toFixed(4)} °C/m
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-[11px] font-medium text-purple-700">
-                {threatSimMode
-                  ? "🚨 HOSTILE SUBMARINE IN SHADOW CORRIDOR"
-                  : `Corridor: ${prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.start_depth_m ?? 75}m to ${prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.end_depth_m ?? 150}m`}
-              </div>
-            </div>
-
-            {/* PILLAR 3: PFZ Fisheries & EEZ Border Alert */}
-            <div className="bg-surface-container-lowest rounded-xl p-space-lg shadow-sm border-t-4 border-t-emerald-500 border border-surface-container-high/60 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-space-sm">
-                  <div className="flex items-center gap-1.5 text-emerald-600">
-                    <span className="material-symbols-outlined text-[20px]">sailing</span>
-                    <span className="font-label-technical text-label-technical uppercase font-bold">Pillar 3</span>
-                  </div>
-                  <span className="font-caption-coordinate text-caption-coordinate text-emerald-600 font-mono font-bold">
-                    PFZ UPWELLING
-                  </span>
-                </div>
-                <h3 className="font-headline-sm text-headline-sm text-primary mb-1">Fisheries &amp; EEZ Alerts</h3>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-space-md">
-                  Cold nutrient upwelling triggering pelagic feeding zones near EEZ lines.
-                </p>
-                <div className="space-y-1.5 bg-surface-container-low p-space-sm rounded font-mono text-xs mb-space-sm">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Upwelling Index:</span>
-                    <span className="font-bold text-emerald-600">
-                      +{(prediction?.derived_pillars?.fisheries?.upwelling_index_c ?? 4.75).toFixed(2)} °C
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">EEZ Border Dist:</span>
-                    <span className="font-bold text-primary">
-                      {(prediction?.derived_pillars?.fisheries?.distance_to_border_km ?? 32.5).toFixed(1)} km
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-[11px] font-medium text-emerald-700">
-                {threatSimMode
-                  ? "🚨 MARITIME BORDER INCURSION ALERT"
-                  : (prediction?.derived_pillars?.fisheries?.border_alert ?? "Safe Zone: Within Domestic EEZ Waters")}
-              </div>
-            </div>
-
-            {/* PILLAR 4: 128-D Ocean Latent Embedding */}
-            <div className="bg-surface-container-lowest rounded-xl p-space-lg shadow-sm border-t-4 border-t-cyan-500 border border-surface-container-high/60 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-space-sm">
-                  <div className="flex items-center gap-1.5 text-cyan-600">
-                    <span className="material-symbols-outlined text-[20px]">database</span>
-                    <span className="font-label-technical text-label-technical uppercase font-bold">Pillar 4</span>
-                  </div>
-                  <span className="font-caption-coordinate text-caption-coordinate text-cyan-600 font-mono font-bold">
-                    VECTOR DB
-                  </span>
-                </div>
-                <h3 className="font-headline-sm text-headline-sm text-primary mb-1">128-D Latent Vector</h3>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-space-md">
-                  Compact representation for Milvus / FAISS similarity search and climate AI forecasting.
-                </p>
-                <div className="space-y-1.5 bg-surface-container-low p-space-sm rounded font-mono text-xs mb-space-sm">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">L2 Norm:</span>
-                    <span className="font-bold text-cyan-600">
-                      {prediction?.latent_embedding?.vector_norm ?? "12.458"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Vector Dims:</span>
-                    <span className="font-bold text-primary">128 Float32</span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-[11px] text-cyan-700 font-medium">
-                FastAPI Latent Encoder Active
-              </div>
-            </div>
-          </div>
-
-          {/* EXPANDED DEDICATED PILLAR DASHBOARD (Interactive Tabs) */}
-          <div className="bg-surface-container-lowest p-space-lg rounded-xl shadow-sm border border-surface-container-high/60 flex flex-col gap-space-md">
-            
-            {/* PILLAR 1 EXPANDED: CYCLONE WARNING */}
+          <div className={`${card} p-6 sm:p-8 flex flex-col gap-8`}>
             {activePillarTab === "cyclone" && (
-              <div className="flex flex-col gap-space-md">
-                <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-space-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-rose-600">air</span>
-                    <h3 className="font-headline-sm text-headline-sm text-primary font-bold">
-                      Pillar 1: Tropical Cyclone Heat Potential (TCHP) &amp; D₂₆ Isotherm
-                    </h3>
-                  </div>
-                  <span className="font-caption-coordinate text-caption-coordinate px-2 py-1 bg-rose-100 text-rose-800 rounded font-mono font-bold">
-                    TCHP REGIONAL ANALYSIS
-                  </span>
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+                  <Stat
+                    label="26 °C isotherm depth"
+                    value={d26.toFixed(1)}
+                    unit="m"
+                    note="Below 50 m, there is a deep warm layer for a storm to draw on."
+                  />
+                  <Stat
+                    label="Cyclone heat potential"
+                    value={tchp.toFixed(1)}
+                    unit="kJ/cm²"
+                    tone="text-rose-600"
+                    note="Above 80 kJ/cm², rapid intensification becomes likely."
+                  />
+                  <Stat
+                    label="Risk"
+                    value={tchp > 80 ? "High" : "Low"}
+                    tone={tchp > 80 ? "text-rose-600" : "text-emerald-700"}
+                    note={cyclone.risk_category ?? "Stable warm upper layer"}
+                  />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-space-md">
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-1">
-                    <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase">
-                      26°C Isotherm Depth (D₂₆)
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-primary">
-                      {(prediction?.derived_pillars?.cyclone?.d26_depth_m ?? 34.6).toFixed(1)} meters
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant">
-                      Depth below surface where seawater cools to 26°C. Deep D₂₆ (&gt;50m) provides a massive thermal reservoir for cyclone intensification.
-                    </p>
-                  </div>
-
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-1">
-                    <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase">
-                      Integrated TCHP Energy
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-rose-600">
-                      {(prediction?.derived_pillars?.cyclone?.tchp_kj_cm2 ?? 3.82).toFixed(2)} kJ/cm²
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant">
-                      Integrated heat energy stored above D₂₆. Values exceeding 80 kJ/cm² trigger explosive storm intensification.
-                    </p>
-                  </div>
-
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col justify-between">
-                    <div>
-                      <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase block mb-1">
-                        Rapid Intensification Status
-                      </span>
-                      <div className={`p-2 rounded font-label-technical text-label-technical font-bold border ${
-                        (prediction?.derived_pillars?.cyclone?.tchp_kj_cm2 ?? 0) > 80
-                          ? "bg-rose-500/10 border-rose-500/30 text-rose-700 animate-pulse"
-                          : "bg-emerald-500/10 border-emerald-500/30 text-emerald-800"
-                      }`}>
-                        {prediction?.derived_pillars?.cyclone?.risk_category ?? "Low Risk (Stable Warm Upper Layer)"}
-                      </div>
-                    </div>
-                    <span className="text-[10px] text-on-surface-variant font-mono">
-                      Calculated directly from 15-depth vertical thermal soundings.
-                    </span>
-                  </div>
-                </div>
-
-                {/* TCHP Thermal Reservoir Visual Gauge */}
-                <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-space-xs font-mono">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-primary font-bold">TCHP Energy Gauge vs Threshold (80 kJ/cm²)</span>
-                    <span className="text-rose-600 font-bold">
-                      {(prediction?.derived_pillars?.cyclone?.tchp_kj_cm2 ?? 3.82).toFixed(2)} kJ/cm²
-                    </span>
-                  </div>
-                  <div className="w-full h-4 bg-surface-container rounded-full overflow-hidden relative">
+                <div className="flex flex-col gap-2">
+                  <div className="w-full h-3 bg-surface-container rounded-full overflow-hidden relative">
                     <div
                       className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-600 transition-all duration-500"
-                      style={{ width: `${Math.min(100, (((prediction?.derived_pillars?.cyclone?.tchp_kj_cm2 ?? 3.82)) / 140) * 100)}%` }}
+                      style={{ width: `${Math.min(100, (tchp / 140) * 100)}%` }}
                     ></div>
-                    <div className="absolute top-0 bottom-0 left-[57%] w-0.5 bg-primary z-10" title="80 kJ/cm² Severe Risk Threshold"></div>
+                    <div className="absolute inset-y-0 left-[57%] w-0.5 bg-primary"></div>
                   </div>
-                  <div className="flex justify-between text-[10px] text-on-surface-variant">
-                    <span>0 kJ/cm² (Stable)</span>
-                    <span className="text-amber-700 font-bold">80 kJ/cm² (Threshold)</span>
-                    <span>140 kJ/cm² (Super Cyclone)</span>
+                  <div className="flex justify-between text-body-sm text-on-surface-variant">
+                    <span>0</span>
+                    <span className="ml-[14%]">80 threshold</span>
+                    <span>140 kJ/cm²</span>
                   </div>
                 </div>
-              </div>
+              </>
             )}
 
-            {/* PILLAR 2 EXPANDED: ASW DEFENSE */}
             {activePillarTab === "asw" && (
-              <div className="flex flex-col gap-space-md">
-                <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-space-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-purple-600">shield</span>
-                    <h3 className="font-headline-sm text-headline-sm text-primary font-bold">
-                      Pillar 2: ASW Thermocline Sonar Shadow Zone &amp; Submarine Concealment
-                    </h3>
-                  </div>
-                  <span className={`font-caption-coordinate text-caption-coordinate px-2 py-1 rounded font-mono font-bold ${
-                    threatSimMode ? "bg-rose-100 text-rose-800 animate-pulse" : "bg-purple-100 text-purple-800"
-                  }`}>
-                    {threatSimMode ? "⚠️ TACTICAL HOSTILE CONTACT DETECTED" : "ACOUSTIC REFRACTION MODEL"}
-                  </span>
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+                  <Stat
+                    label="Thermocline core"
+                    value={thermoclineCore}
+                    unit="m"
+                    note="Where temperature drops fastest with depth."
+                  />
+                  <Stat
+                    label="Steepest gradient"
+                    value={maxGradient.toFixed(3)}
+                    unit="°C/m"
+                    tone="text-purple-600"
+                    note="Stronger gradients bend sonar more sharply."
+                  />
+                  <Stat
+                    label="Shadow zone"
+                    value={`${shadowStart}–${shadowEnd}`}
+                    unit="m"
+                    tone="text-purple-600"
+                    note="Surface sonar refracts away from this band."
+                  />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-space-md">
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-1">
-                    <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase">
-                      Thermocline Core Depth
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-primary">
-                      {prediction?.derived_pillars?.asw_defense?.thermocline_core_depth_m ?? 75} meters
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant">
-                      Depth layer exhibiting the steepest vertical temperature gradient where water density shifts rapidly.
-                    </p>
-                  </div>
+                {(() => {
+                  const yStart = Math.min(55, Math.max(25, Math.round((shadowStart / 200) * 100)));
+                  const yEnd = Math.min(115, Math.max(yStart + 30, Math.round((shadowEnd / 200) * 100)));
 
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-1">
-                    <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase">
-                      Max Thermal Gradient (∂T/∂z)
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-purple-600">
-                      {(prediction?.derived_pillars?.asw_defense?.max_thermal_gradient_c_per_m ?? -0.176).toFixed(4)} °C/m
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant">
-                      Negative rate of temperature change per meter of depth. Stronger gradients create sharper acoustic ray bending.
-                    </p>
-                  </div>
+                  return (
+                    <svg className="w-full max-w-3xl h-auto rounded-xl overflow-hidden" viewBox="0 0 500 140">
+                      <rect x="0" y="0" width="500" height={yStart} fill="#EAF5FF" />
+                      <rect x="0" y={yStart} width="500" height={yEnd - yStart} fill={threatSimMode ? "#FEE2E2" : "#D3EBFF"} />
+                      <rect x="0" y={yEnd} width="500" height={140 - yEnd} fill="#C7E7FE" />
+                      <line x1="0" y1={yStart} x2="500" y2={yStart} stroke={threatSimMode ? "#EF4444" : "#00B1C9"} strokeDasharray="4 2" strokeWidth="1" />
 
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col justify-between">
-                    <div>
-                      <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase block mb-1">
-                        Active Sonar Shadow Corridor
-                      </span>
-                      <div className="text-2xl font-bold font-mono text-purple-600">
-                        {prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.start_depth_m ?? 75}m – {prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.end_depth_m ?? 150}m
-                      </div>
-                    </div>
-                    <span className="text-[11px] text-on-surface-variant">
-                      Corridor Thickness: {prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.thickness_m ?? 75}m. Surface active sonar waves reflect/refract away, concealing tactical submarines.
-                    </span>
-                  </div>
+                      <text x="12" y="16" fill="#42474E" fontSize="9">Mixed layer</text>
+                      <text x="12" y={yStart + 14} fill={threatSimMode ? "#991B1B" : "#006686"} fontSize="9">Shadow zone</text>
+                      <text x="12" y={yEnd + 14} fill="#42474E" fontSize="9">Deep water</text>
+
+                      {/* Ship and bending sonar rays */}
+                      <g transform="translate(400, 4)">
+                        <circle cx="12" cy="8" r="3.5" fill="#00253D" />
+                        <path d="M 0,12 L 24,12 L 20,18 L 4,18 Z" fill="#00253D" />
+                      </g>
+                      <path d={`M 412,18 Q 300,${yStart + 2} 180,${yStart + 5} T 40,${yStart + 8}`} fill="none" stroke="#BA1A1A" strokeWidth="1.5" strokeDasharray="3 3" />
+                      <path d={`M 412,18 Q 270,${yStart} 130,${yStart + 3} T 20,${yStart + 6}`} fill="none" stroke="#BA1A1A" strokeWidth="1.2" strokeDasharray="3 3" />
+
+                      <g transform={`translate(260, ${yStart + (yEnd - yStart) / 2})`}>
+                        <ellipse rx="22" ry="7" fill={threatSimMode ? "#B91C1C" : "#4FD7F0"} stroke="#00272D" strokeWidth="1.2" />
+                        <rect x="-3" y="-12" width="6" height="6" fill={threatSimMode ? "#7F1D1D" : "#00272D"} />
+                      </g>
+                    </svg>
+                  );
+                })()}
+
+                <p className="text-body-sm text-on-surface-variant">
+                  {threatSimMode
+                    ? `Simulated contact inside the ${shadowStart}–${shadowEnd} m shadow zone, out of reach of hull-mounted sonar.`
+                    : "No contact. Sonar rays bend normally through the thermocline."}
+                </p>
+              </>
+            )}
+
+            {activePillarTab === "fisheries" && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+                  <Stat
+                    label="Upwelling index"
+                    value={`+${upwelling.toFixed(2)}`}
+                    unit="°C"
+                    tone="text-emerald-700"
+                    note="Surface minus 50 m temperature. Higher means colder, nutrient-rich water is rising."
+                  />
+                  <Stat
+                    label="Fishing zone"
+                    value={upwelling > 3 ? "Promising" : "Weak"}
+                    tone="text-emerald-700"
+                    note={fisheries.pfz_status ?? "High potential fishing zone"}
+                  />
+                  <Stat
+                    label="Distance to boundary"
+                    value={borderDistance.toFixed(1)}
+                    unit="km"
+                    tone={threatSimMode ? "text-rose-600" : "text-amber-700"}
+                    note="Distance to the international maritime boundary line."
+                  />
                 </div>
 
-                {/* Submarine Tactical Contact Alert Banner */}
-                {threatSimMode ? (
-                  <div className="p-space-md rounded-lg bg-rose-50 border border-rose-300 text-rose-900 flex items-center justify-between gap-space-md animate-pulse">
-                    <div className="flex items-center gap-space-sm">
-                      <span className="material-symbols-outlined text-rose-600 text-[26px]">warning</span>
-                      <div>
-                        <span className="font-bold text-xs block uppercase">⚠️ TACTICAL HOSTILE CONTACT DETECTED IN SECTOR</span>
-                        <p className="text-xs">
-                          Active hostile submarine detected operating inside the acoustic shadow corridor ({prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.start_depth_m ?? 75}m–{prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.end_depth_m ?? 150}m). Surface ship active sonar waves are bending upward/downward, leaving the submarine invisible to hull sonars.
-                        </p>
-                      </div>
-                    </div>
-                    <button className="px-3 py-1 bg-rose-600 text-white rounded text-xs font-semibold hover:bg-rose-700 transition">
-                      Dispatch ASW Sonobuoy
+                <div className={`px-5 py-4 rounded-xl border text-body-md flex items-start gap-3 ${
+                  threatSimMode ? "bg-rose-50 border-rose-200 text-rose-900" : "bg-amber-50 border-amber-200 text-amber-900"
+                }`}>
+                  <span className="material-symbols-outlined text-[20px]">info</span>
+                  {fisheries.border_alert ?? "Safe zone: within domestic EEZ waters."}
+                </div>
+              </>
+            )}
+
+            {activePillarTab === "volume" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                <div className="lg:col-span-4 flex flex-col gap-6">
+                  <p className="text-body-md text-on-surface-variant">
+                    The column is split into five layers. Click a layer to jump to that depth.
+                  </p>
+                  <Stat label="Surface" value={surfaceTemp.toFixed(1)} unit="°C" />
+                  <Stat label="Thermocline core" value={thermoclineCore} unit="m" />
+                  <Stat label="1000 m" value={abyssalTemp.toFixed(1)} unit="°C" />
+                  <div className="flex gap-2">
+                    <button onClick={() => setStratumRotation((prev) => prev - 15)} className={ghostButton} aria-label="Rotate left">
+                      <span className="material-symbols-outlined text-[18px]">rotate_left</span>
                     </button>
+                    <button onClick={() => setStratumRotation((prev) => prev + 15)} className={ghostButton} aria-label="Rotate right">
+                      <span className="material-symbols-outlined text-[18px]">rotate_right</span>
+                    </button>
+                    <button onClick={() => setStratumRotation(0)} className={ghostButton}>Reset</button>
                   </div>
-                ) : (
-                  <div className="p-space-sm rounded-lg bg-surface-container-low border border-surface-container-high/40 text-on-surface-variant flex items-center justify-between text-xs font-mono">
-                    <span>STATUS: Sector Clear • Standard Acoustic Ray Bending (No Submarine Contact)</span>
-                    <span className="text-secondary font-bold">ASW SENSOR ACTIVE</span>
-                  </div>
-                )}
+                </div>
 
-                {/* Acoustic Sonar Wave Ray Bending Diagram (SVG with Non-Overlapping Labels) */}
-                <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-space-xs font-mono">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-primary font-bold">Submarine Sonar Refraction Ray Path (Snell's Law Simulation)</span>
-                    <span className="text-purple-600 font-bold">
-                      Shadow Layer: {prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.start_depth_m ?? 75}m – {prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.end_depth_m ?? 150}m
-                    </span>
-                  </div>
-                  {(() => {
-                    const shadowStart = prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.start_depth_m ?? 75;
-                    const shadowEnd = prediction?.derived_pillars?.asw_defense?.sonic_shadow_zone?.end_depth_m ?? 150;
-                    const maxGrad = (prediction?.derived_pillars?.asw_defense?.max_thermal_gradient_c_per_m ?? -0.176).toFixed(4);
+                <div className="lg:col-span-8 h-[340px] rounded-xl bg-surface-container-low overflow-hidden flex items-center justify-center p-4">
+                  <svg
+                    className="w-full h-full transition-transform duration-500 ease-out"
+                    viewBox="0 0 520 340"
+                    style={{ transform: `rotate(${stratumRotation}deg)` }}
+                  >
+                    {[
+                      { depth: "0–30 m", label: "Surface layer", depthIdx: 0, yOffset: 40, colors: ["#EA580C", "#F97316", "#FB923C", "#F59E0B"] },
+                      { depth: "50–100 m", label: "Thermocline", depthIdx: 7, yOffset: 95, colors: ["#00B1C9", "#14B8A6", "#34D399", "#FBBF24"] },
+                      { depth: "125–200 m", label: "Sub-thermocline", depthIdx: 10, yOffset: 150, colors: ["#0284C7", "#00B1C9", "#38BDF8", "#10B981"] },
+                      { depth: "300–500 m", label: "Intermediate", depthIdx: 12, yOffset: 205, colors: ["#1E40AF", "#2563EB", "#3B82F6", "#60A5FA"] },
+                      { depth: "750–1000 m", label: "Deep", depthIdx: 14, yOffset: 260, colors: ["#00253D", "#003E47", "#1E3A8A", "#1D4ED8"] }
+                    ].map((stratum, sIdx) => {
+                      const isSelectedLayer = selectedDepthIdx >= stratum.depthIdx - 2 && selectedDepthIdx <= stratum.depthIdx + 2;
+                      const centerX = 260;
 
-                    const yStart = Math.min(55, Math.max(25, Math.round((shadowStart / 200) * 100)));
-                    const yEnd = Math.min(115, Math.max(yStart + 30, Math.round((shadowEnd / 200) * 100)));
+                      return (
+                        <g key={sIdx}>
+                          <polygon
+                            points={`${centerX},${stratum.yOffset - 35} 400,${stratum.yOffset} ${centerX},${stratum.yOffset + 35} 120,${stratum.yOffset}`}
+                            fill={isSelectedLayer ? "#00B1C9" : "#94A3B8"}
+                            fillOpacity={isSelectedLayer ? "0.15" : "0.05"}
+                            stroke={isSelectedLayer ? "#00B1C9" : "#CBD5E1"}
+                            strokeWidth={isSelectedLayer ? "2" : "1"}
+                            strokeDasharray={isSelectedLayer ? "none" : "3 3"}
+                          />
+                          {[0, 1, 2, 3, 4].map((row) =>
+                            [0, 1, 2, 3, 4].map((col) => {
+                              const cellU = (col - 2) / 2.5;
+                              const cellV = (row - 2) / 2.5;
+                              const cx = centerX + (cellU - cellV) * 52;
+                              const cy = stratum.yOffset + (cellU + cellV) * 14;
+                              const cellColor = stratum.colors[(row * 3 + col * 2 + sIdx) % stratum.colors.length];
 
-                    return (
-                      <svg className="w-full h-36 bg-surface-container rounded overflow-hidden" viewBox="0 0 500 140">
-                        {/* Surface Mixed Layer */}
-                        <rect x="0" y="0" width="500" height={yStart} fill="#EAF5FF" />
-                        <text x="12" y={Math.min(20, yStart - 8)} fill="#00253D" fontSize="10" fontWeight="bold">
-                          Surface Mixed Layer (0m – {shadowStart}m)
-                        </text>
-
-                        {/* Surface Ship Icon & Label (Positioned at right x=320 to prevent overlapping text) */}
-                        <g transform="translate(320, 4)">
-                          <circle cx="12" cy="8" r="4" fill="#00253D" />
-                          <path d="M 0,12 L 24,12 L 20,18 L 4,18 Z" fill="#00253D" />
-                          <text x="30" y="15" fill="#00253D" fontSize="9" fontWeight="bold">Surface Ship Active Sonar</text>
-                        </g>
-
-                        {/* Thermocline Acoustic Shadow Layer */}
-                        <rect x="0" y={yStart} width="500" height={yEnd - yStart} fill={threatSimMode ? "#FEE2E2" : "#D3EBFF"} opacity="0.85" />
-                        <line x1="0" y1={yStart} x2="500" y2={yStart} stroke={threatSimMode ? "#EF4444" : "#00B1C9"} strokeDasharray="4 2" strokeWidth="1.5" />
-                        <text x="12" y={yStart + Math.min(22, (yEnd - yStart) / 2 + 4)} fill={threatSimMode ? "#991B1B" : "#006686"} fontSize="10" fontWeight="bold">
-                          {threatSimMode
-                            ? `⚠️ Thermocline Acoustic Shadow Corridor (${shadowStart}m – ${shadowEnd}m) — HOSTILE SUB DETECTED`
-                            : `Thermocline Refraction Layer (${shadowStart}m – ${shadowEnd}m) — Max ∂T/∂z: ${maxGrad}°C/m`}
-                        </text>
-
-                        {/* Deep Ocean Layer */}
-                        <rect x="0" y={yEnd} width="500" height={140 - yEnd} fill="#C7E7FE" opacity="0.9" />
-                        <text x="12" y={Math.min(132, yEnd + 16)} fill="#00272D" fontSize="10" fontWeight="bold">
-                          Deep Ocean Abyssal Layer (&gt;{shadowEnd}m)
-                        </text>
-
-                        {/* Sonar Ray Paths Bending Away */}
-                        <path d={`M 332,16 Q 240,${yStart + 2} 140,${yStart + 5} T 20,${yStart + 8}`} fill="none" stroke={threatSimMode ? "#DC2626" : "#BA1A1A"} strokeWidth="2" strokeDasharray="3 3" />
-                        <path d={`M 332,16 Q 210,${yStart} 90,${yStart + 3} T 10,${yStart + 6}`} fill="none" stroke={threatSimMode ? "#DC2626" : "#BA1A1A"} strokeWidth="1.5" strokeDasharray="3 3" />
-
-                        {/* Submarine Graphic inside Shadow Layer */}
-                        <g transform={`translate(240, ${yStart + (yEnd - yStart) / 2})`}>
-                          {threatSimMode && (
-                            <circle cx="0" cy="0" r="28" fill="#EF4444" fillOpacity="0.2" className="animate-ping" />
+                              return (
+                                <polygon
+                                  key={`${row}-${col}`}
+                                  points={`${cx},${cy - 8} ${cx + 22},${cy} ${cx},${cy + 8} ${cx - 22},${cy}`}
+                                  fill={cellColor}
+                                  fillOpacity={isSelectedLayer ? "0.9" : "0.5"}
+                                  stroke="#ffffff"
+                                  strokeWidth="0.8"
+                                  className="cursor-pointer"
+                                  onClick={() => setSelectedDepthIdx(stratum.depthIdx)}
+                                >
+                                  <title>{`${stratum.label} (${stratum.depth})`}</title>
+                                </polygon>
+                              );
+                            })
                           )}
-                          <ellipse cx="0" cy="0" rx="26" ry="8" fill={threatSimMode ? "#B91C1C" : "#4FD7F0"} stroke="#00272D" strokeWidth="1.5" />
-                          <rect x="-4" y="-14" width="7" height="7" fill={threatSimMode ? "#7F1D1D" : "#00272D"} />
-                          <text x="32" y="4" fill={threatSimMode ? "#991B1B" : "#00272D"} fontSize="9" fontWeight="bold">
-                            {threatSimMode ? "🚨 HOSTILE SUBMARINE (CONCEALED)" : "Tactical Submarine (Sonar Shadow)"}
+                          <text x="420" y={stratum.yOffset + 4} fill={isSelectedLayer ? "#006686" : "#72787E"} fontSize="11" fontWeight={isSelectedLayer ? "600" : "400"}>
+                            {stratum.depth}
                           </text>
                         </g>
-                      </svg>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
-
-            {/* PILLAR 3 EXPANDED: PFZ FISHERIES & EEZ BORDER ALERT */}
-            {activePillarTab === "fisheries" && (
-              <div className="flex flex-col gap-space-md">
-                <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-space-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-emerald-600">sailing</span>
-                    <h3 className="font-headline-sm text-headline-sm text-primary font-bold">
-                      Pillar 3: Potential Fishing Zone (PFZ) &amp; Maritime EEZ Border Warning
-                    </h3>
-                  </div>
-                  <span className={`font-caption-coordinate text-caption-coordinate px-2 py-1 rounded font-mono font-bold ${
-                    threatSimMode ? "bg-rose-100 text-rose-800 animate-pulse" : "bg-emerald-100 text-emerald-800"
-                  }`}>
-                    {threatSimMode ? "🚨 BORDER INCURSION ALERT" : "EEZ MARITIME SAFETY ACTIVE"}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-space-md">
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-1">
-                    <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase">
-                      Upwelling Thermal Index (T₀ - T₅₀)
-                    </span>
-                    <div className="text-2xl font-bold font-mono text-emerald-600">
-                      +{(prediction?.derived_pillars?.fisheries?.upwelling_index_c ?? 4.75).toFixed(2)} °C
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant">
-                      Temperature delta between surface and 50m depth. High values indicate cold nutrient-rich upwelling.
-                    </p>
-                  </div>
-
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-1">
-                    <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase">
-                      PFZ Shoal Habitat Status
-                    </span>
-                    <div className="text-sm font-bold font-mono text-emerald-700 p-2 rounded bg-emerald-500/10 border border-emerald-500/30">
-                      {prediction?.derived_pillars?.fisheries?.pfz_status ?? "High Potential Fishing Zone"}
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant mt-1">
-                      Pelagic fish shoals (Tuna, Mackerel) congregate along thermal fronts driven by cold upwelling.
-                    </p>
-                  </div>
-
-                  <div className="bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col justify-between">
-                    <div>
-                      <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant uppercase block mb-1">
-                        Maritime Boundary Proximity
-                      </span>
-                      <div className={`p-2 rounded font-label-technical text-label-technical font-bold border ${
-                        threatSimMode ? "bg-rose-500/10 border-rose-500/30 text-rose-700" : "bg-amber-500/10 border-amber-500/30 text-amber-800"
-                      }`}>
-                        {(prediction?.derived_pillars?.fisheries?.distance_to_border_km ?? 32.5).toFixed(1)} km to EEZ Boundary
-                      </div>
-                    </div>
-                    <span className="text-[10px] text-on-surface-variant font-mono">
-                      Automated alert dispatched when shoals drift near international lines.
-                    </span>
-                  </div>
-                </div>
-
-                {/* EEZ Border Crossing Alert Banner */}
-                <div className={`p-space-md rounded-lg border flex items-center justify-between gap-space-md ${
-                  threatSimMode ? "bg-rose-50 border-rose-300 text-rose-900 animate-pulse" : "bg-amber-50 border-amber-300 text-amber-900"
-                }`}>
-                  <div className="flex items-center gap-space-sm">
-                    <span className={`material-symbols-outlined text-[24px] ${threatSimMode ? "text-rose-600" : "text-amber-600"}`}>warning</span>
-                    <div>
-                      <span className="font-bold text-xs block uppercase">EEZ Maritime Border Alert Dispatch</span>
-                      <p className="text-xs">
-                        {prediction?.derived_pillars?.fisheries?.border_alert ?? "Safe Zone: Within Domestic EEZ Waters"}
-                      </p>
-                    </div>
-                  </div>
-                  <button className={`px-3 py-1 rounded text-xs font-semibold text-white transition ${
-                    threatSimMode ? "bg-rose-600 hover:bg-rose-700" : "bg-amber-600 hover:bg-amber-700"
-                  }`}>
-                    Dispatch Alert
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* PILLAR 4 EXPANDED: 3D SUBSURFACE OCEAN FIELD & 3D STRATUM VOLUME (MATCHES IMAGE 1) */}
-            {activePillarTab === "volume" && (
-              <div className="flex flex-col gap-space-md">
-                {/* Header section matching Image 1 */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-surface-container-high/40 pb-space-xs gap-2">
-                  <div>
-                    <h3 className="font-headline-md text-headline-md text-primary font-bold">
-                      3D Subsurface Ocean Field
-                    </h3>
-                    <p className="text-xs text-on-surface-variant">
-                      Interactive digital twin of the reconstructed temperature volume
-                    </p>
-                  </div>
-                  <div className="px-3 py-1 bg-surface-container-high text-primary rounded-full text-xs font-mono font-bold border border-surface-container-high/60 self-start sm:self-auto">
-                    Selected slice: {currentDepth} m
-                  </div>
-                </div>
-
-                {/* Main 2-Column Grid matching Image 1 layout */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg">
-                  
-                  {/* LEFT COLUMN: 15-depth temperature profile (Lg col 5) */}
-                  <div className="lg:col-span-5 bg-surface-container-low/70 p-space-lg rounded-2xl border border-surface-container-high/60 flex flex-col justify-between shadow-sm">
-                    <div>
-                      <h4 className="text-sm font-bold text-primary">15-depth temperature profile</h4>
-                      <span className="text-xs text-on-surface-variant block mb-3">Surface to 1000 m</span>
-
-                      {/* Large temperature readout */}
-                      <div className="text-4xl font-bold font-mono text-primary mb-4 tracking-tight">
-                        {currentTemp.toFixed(1)}°C
-                      </div>
-
-                      {/* Depth selector slider */}
-                      <div className="mb-4">
-                        <div className="flex justify-between items-center text-xs font-semibold text-primary mb-1">
-                          <span>Depth selector</span>
-                          <span className="font-mono text-secondary">{currentDepth} m</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="14"
-                          step="1"
-                          value={selectedDepthIdx}
-                          onChange={(e) => setSelectedDepthIdx(Number(e.target.value))}
-                          className="w-full accent-primary cursor-pointer h-2 bg-surface-container rounded-lg"
-                        />
-                        <div className="flex justify-between text-[11px] text-on-surface-variant font-mono mt-1">
-                          <span>0 m</span>
-                          <span>500 m</span>
-                          <span>1000 m</span>
-                        </div>
-                      </div>
-
-                      {/* Vertical Temperature Curve Graph */}
-                      <div className="relative bg-surface-container-lowest/80 p-3 rounded-xl border border-surface-container-high/40 mb-4">
-                        <div className="flex justify-between text-[10px] text-on-surface-variant font-mono mb-1">
-                          <span>0 m</span>
-                          <span>Depth ↓</span>
-                          <span>1000 m</span>
-                        </div>
-                        <svg className="w-full h-44" viewBox="0 0 280 180" preserveAspectRatio="none">
-                          {/* Grid lines */}
-                          <line x1="30" y1="20" x2="270" y2="20" stroke="#E2E8F0" strokeWidth="1" />
-                          <line x1="30" y1="90" x2="270" y2="90" stroke="#E2E8F0" strokeDasharray="3 3" strokeWidth="1" />
-                          <line x1="30" y1="160" x2="270" y2="160" stroke="#E2E8F0" strokeWidth="1" />
-                          
-                          {/* Y Axis line */}
-                          <line x1="30" y1="20" x2="30" y2="160" stroke="#94A3B8" strokeWidth="1.5" />
-
-                          {/* Temperature Curve */}
-                          <path
-                            d={curvePathD}
-                            fill="none"
-                            stroke="#00B1C9"
-                            strokeWidth="3.5"
-                            strokeLinecap="round"
-                          />
-
-                          {/* Highlight dot for current selected depth */}
-                          {curvePoints[selectedDepthIdx] && (
-                            <g>
-                              <circle
-                                cx={curvePoints[selectedDepthIdx].x}
-                                cy={curvePoints[selectedDepthIdx].y}
-                                r="7"
-                                fill="#EA580C"
-                                stroke="#ffffff"
-                                strokeWidth="2.5"
-                                className="shadow-md"
-                              />
-                              <circle
-                                cx={curvePoints[selectedDepthIdx].x}
-                                cy={curvePoints[selectedDepthIdx].y}
-                                r="12"
-                                fill="#EA580C"
-                                fillOpacity="0.2"
-                                className="animate-ping"
-                              />
-                            </g>
-                          )}
-                        </svg>
-
-                        <div className="flex justify-between text-[10px] text-on-surface-variant font-mono pt-1 border-t border-surface-container-high/30">
-                          <span>8°C</span>
-                          <span>28°C</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Selected Depth Stat Cards (Matching Image 1) */}
-                    <div>
-                      <div className="flex justify-between text-xs font-semibold text-primary mb-2">
-                        <span>Selected depth</span>
-                        <span className="font-mono text-secondary font-bold">{currentDepth} m</span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-surface-container-lowest p-2.5 rounded-xl border border-surface-container-high/50 flex flex-col justify-between">
-                          <span className="text-[10px] text-on-surface-variant block uppercase font-mono">Thermocline</span>
-                          <span className="text-base font-bold font-mono text-primary mt-1">
-                            {prediction?.derived_pillars?.asw_defense?.thermocline_core_depth_m ?? 75} m
-                          </span>
-                        </div>
-
-                        <div className="bg-surface-container-lowest p-2.5 rounded-xl border border-surface-container-high/50 flex flex-col justify-between">
-                          <span className="text-[10px] text-on-surface-variant block uppercase font-mono">Surface</span>
-                          <span className="text-base font-bold font-mono text-primary mt-1">
-                            {surfaceTemp.toFixed(1)}°C
-                          </span>
-                        </div>
-
-                        <div className="bg-surface-container-lowest p-2.5 rounded-xl border border-surface-container-high/50 flex flex-col justify-between">
-                          <span className="text-[10px] text-on-surface-variant block uppercase font-mono">Deep layer</span>
-                          <span className="text-base font-bold font-mono text-primary mt-1">
-                            {abyssalTemp.toFixed(1)}°C
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* RIGHT COLUMN: 3D stratum volume (Lg col 7) */}
-                  <div className="lg:col-span-7 bg-surface-container-low/70 p-space-lg rounded-2xl border border-surface-container-high/60 flex flex-col justify-between shadow-sm relative min-h-[460px]">
-                    <div>
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <h4 className="text-base font-bold text-primary">3D stratum volume</h4>
-                          <p className="text-xs text-on-surface-variant">Each layer represents a depth interval</p>
-                        </div>
-                        <span className="text-xs text-on-surface-variant font-mono">Rotate using the buttons</span>
-                      </div>
-
-                      {/* Interactive 3D Stacked Stratum Canvas/SVG */}
-                      <div className="relative w-full h-[340px] bg-gradient-to-b from-[#E0F2FE]/40 via-[#F0F9FF]/60 to-[#E0F2FE]/30 rounded-xl overflow-hidden flex items-center justify-center p-4 border border-surface-container-high/40">
-                        
-                        {/* SVG Interactive Isometric Stacked Stratum Layers */}
-                        <svg
-                          className="w-full h-full transition-transform duration-500 ease-out"
-                          viewBox="0 0 520 340"
-                          style={{ transform: `rotate(${stratumRotation}deg)` }}
-                        >
-                          {/* Stacked 5 Stratum Layers in 3D Isometric Projection */}
-                          {[
-                            { depth: "0-30m", label: "Surface Layer", depthIdx: 0, yOffset: 40, colors: ["#EA580C", "#F97316", "#FB923C", "#F59E0B"] },
-                            { depth: "50-100m", label: "Thermocline Layer", depthIdx: 7, yOffset: 95, colors: ["#00B1C9", "#14B8A6", "#34D399", "#FBBF24"] },
-                            { depth: "125-200m", label: "Sub-Thermocline", depthIdx: 10, yOffset: 150, colors: ["#0284C7", "#00B1C9", "#38BDF8", "#10B981"] },
-                            { depth: "300-500m", label: "Intermediate Deep", depthIdx: 12, yOffset: 205, colors: ["#1E40AF", "#2563EB", "#3B82F6", "#60A5FA"] },
-                            { depth: "750-1000m", label: "Abyssal Floor", depthIdx: 14, yOffset: 260, colors: ["#00253D", "#003E47", "#1E3A8A", "#1D4ED8"] },
-                          ].map((stratum, sIdx) => {
-                            const isSelectedLayer = selectedDepthIdx >= stratum.depthIdx - 2 && selectedDepthIdx <= stratum.depthIdx + 2;
-                            
-                            const topY = stratum.yOffset - 35;
-                            const bottomY = stratum.yOffset + 35;
-                            const leftX = 120;
-                            const rightX = 400;
-                            const centerX = 260;
-
-                            return (
-                              <g key={sIdx} className="transition-all duration-300">
-                                {/* Layer Base Glass Shadow */}
-                                <polygon
-                                  points={`${centerX},${topY} ${rightX},${stratum.yOffset} ${centerX},${bottomY} ${leftX},${stratum.yOffset}`}
-                                  fill={isSelectedLayer ? "#00B1C9" : "#94A3B8"}
-                                  fillOpacity={isSelectedLayer ? "0.15" : "0.05"}
-                                  stroke={isSelectedLayer ? "#00B1C9" : "#CBD5E1"}
-                                  strokeWidth={isSelectedLayer ? "2.5" : "1"}
-                                  strokeDasharray={isSelectedLayer ? "none" : "3 3"}
-                                />
-
-                                {/* 5x5 Grid Cells inside this stratum layer */}
-                                {[0, 1, 2, 3, 4].map((row) =>
-                                  [0, 1, 2, 3, 4].map((col) => {
-                                    const cellU = (col - 2) / 2.5;
-                                    const cellV = (row - 2) / 2.5;
-                                    const cx = centerX + (cellU - cellV) * 52;
-                                    const cy = stratum.yOffset + (cellU + cellV) * 14;
-
-                                    const p1 = `${cx},${cy - 8}`;
-                                    const p2 = `${cx + 22},${cy}`;
-                                    const p3 = `${cx},${cy + 8}`;
-                                    const p4 = `${cx - 22},${cy}`;
-
-                                    const colorIdx = Math.abs((row * 3 + col * 2 + sIdx) % stratum.colors.length);
-                                    const cellColor = stratum.colors[colorIdx];
-
-                                    return (
-                                      <polygon
-                                        key={`${row}-${col}`}
-                                        points={`${p1} ${p2} ${p3} ${p4}`}
-                                        fill={cellColor}
-                                        fillOpacity={isSelectedLayer ? "0.9" : "0.55"}
-                                        stroke="#ffffff"
-                                        strokeWidth="0.8"
-                                        className="transition-transform duration-200 hover:opacity-100 cursor-pointer"
-                                        onClick={() => setSelectedDepthIdx(stratum.depthIdx)}
-                                      >
-                                        <title>{stratum.label} ({stratum.depth})</title>
-                                      </polygon>
-                                    );
-                                  })
-                                )}
-
-                                {/* Active Depth Selection Indicator Tag */}
-                                {isSelectedLayer && (
-                                  <g transform={`translate(${rightX + 15}, ${stratum.yOffset - 5})`}>
-                                    <rect x="0" y="-12" width="70" height="20" rx="4" fill="#00B1C9" />
-                                    <text x="35" y="2" fill="#ffffff" fontSize="10" fontWeight="bold" textAnchor="middle">
-                                      Depth ↓
-                                    </text>
-                                  </g>
-                                )}
-                              </g>
-                            );
-                          })}
-                        </svg>
-                      </div>
-
-                      {/* Bottom Action Buttons & Legend (Matching Image 1) */}
-                      <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-3 border-t border-surface-container-high/40">
-                        {/* Interactive View Controls */}
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setStratumRotation((prev) => prev - 15)}
-                            className="px-3 py-1.5 bg-surface-container-lowest hover:bg-surface-container-high border border-surface-container-high/60 rounded-lg text-xs font-semibold text-primary transition shadow-sm"
-                          >
-                            Rotate left
-                          </button>
-                          <button
-                            onClick={() => setStratumRotation((prev) => prev + 15)}
-                            className="px-3 py-1.5 bg-surface-container-lowest hover:bg-surface-container-high border border-surface-container-high/60 rounded-lg text-xs font-semibold text-primary transition shadow-sm"
-                          >
-                            Rotate right
-                          </button>
-                          <button
-                            onClick={() => setStratumRotation(0)}
-                            className="px-3 py-1.5 bg-surface-container-lowest hover:bg-surface-container-high border border-surface-container-high/60 rounded-lg text-xs font-semibold text-on-surface-variant transition shadow-sm"
-                          >
-                            Reset view
-                          </button>
-                        </div>
-
-                        {/* Color Legend & Footnote */}
-                        <div className="flex items-center gap-4 text-xs font-mono text-on-surface-variant">
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-3.5 h-3.5 rounded-sm bg-[#EA580C]"></span>
-                            <span>Warm</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-3.5 h-3.5 rounded-sm bg-[#00B1C9]"></span>
-                            <span>Moderate</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-3.5 h-3.5 rounded-sm bg-[#1E40AF]"></span>
-                            <span>Cold</span>
-                          </div>
-                          <span className="text-[10px] text-on-surface-variant hidden sm:inline">
-                            Illustrative values for interface demonstration
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                      );
+                    })}
+                  </svg>
                 </div>
               </div>
             )}
           </div>
-        </section>
+        </Section>
 
-        {/* =======================================================================
-            128-D LATENT OCEAN EMBEDDING INSPECTOR & SIMILARITY SEARCH
-            ======================================================================= */}
-        <section id="latent-inspector" className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-surface-container-high/60 flex flex-col gap-space-md">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-space-xs border-b border-surface-container-high/60 pb-space-sm">
-            <div>
-              <span className="font-label-technical text-label-technical uppercase tracking-wider text-secondary font-semibold block">
-                Latent Signature Extraction
-              </span>
-              <h2 className="font-headline-md text-headline-md text-primary font-semibold">
-                128-Dimensional Ocean Latent Embedding Inspector
-              </h2>
-            </div>
-            <button
-              onClick={handleCopyVector}
-              className="px-space-md py-space-xs bg-surface-container-high hover:bg-surface-container text-primary text-xs font-mono rounded flex items-center gap-1.5 transition self-start sm:self-auto"
-            >
-              <span className="material-symbols-outlined text-[16px]">content_copy</span>
-              <span>{copied ? "Copied 128 Floats!" : "Copy Embedding Vector"}</span>
+        {/* Latent embedding */}
+        <Section
+          id="embedding"
+          title="Latent embedding"
+          description="A 128-number summary of this ocean state, used to find similar conditions in the archive."
+          actions={
+            <button onClick={handleCopyVector} className={ghostButton}>
+              <span className="material-symbols-outlined text-[18px]">{copied ? "check" : "content_copy"}</span>
+              {copied ? "Copied" : "Copy vector"}
             </button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-md">
-            <div className="lg:col-span-4 bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-space-xs text-xs font-mono">
-              <div className="flex justify-between border-b border-surface-container-high/40 pb-1">
-                <span className="text-on-surface-variant">Vector Norm (L2)</span>
-                <span className="font-bold text-primary">{prediction.latent_embedding?.vector_norm ?? "12.4582"}</span>
-              </div>
-              <div className="flex justify-between border-b border-surface-container-high/40 pb-1">
-                <span className="text-on-surface-variant">Embedding Dims</span>
-                <span className="font-bold text-primary">128 Dims</span>
-              </div>
-              <div className="flex justify-between border-b border-surface-container-high/40 pb-1">
-                <span className="text-on-surface-variant">Mean / Std Dev</span>
-                <span className="font-bold text-secondary">{prediction.latent_embedding?.mean ?? "0.012"} / {prediction.latent_embedding?.std ?? "0.894"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-on-surface-variant">Min / Max Range</span>
-                <span className="font-bold text-secondary">[{prediction.latent_embedding?.min ?? "-2.14"}, {prediction.latent_embedding?.max ?? "2.38"}]</span>
-              </div>
+          }
+        >
+          <div className={`${card} p-6 sm:p-8 flex flex-col gap-8`}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+              <Stat label="L2 norm" value={latent.vector_norm ?? "12.458"} />
+              <Stat label="Dimensions" value="128" />
+              <Stat label="Mean / std" value={`${latent.mean ?? "0.012"} / ${latent.std ?? "0.894"}`} />
+              <Stat label="Range" value={`${latent.min ?? "-2.14"} to ${latent.max ?? "2.38"}`} />
             </div>
 
-            <div className="lg:col-span-8 bg-surface-container-low p-space-md rounded-lg border border-surface-container-high/40 flex flex-col gap-space-xs">
-              <span className="font-caption-coordinate text-caption-coordinate text-on-surface-variant font-mono uppercase">
-                128-D Latent Representation Spectrum
-              </span>
-              <div className="h-20 w-full flex items-center gap-0.5 overflow-x-auto p-1 bg-surface-container rounded">
-                {(prediction.latent_embedding?.full_latent_vector || DETERMINISTIC_INITIAL_PREDICTION.latent_embedding.full_latent_vector).map((val, idx) => {
-                  const normH = Math.min(100, Math.max(12, (Math.abs(val) / 2.5) * 100));
-                  return (
-                    <div
-                      key={idx}
-                      title={`Dim ${idx}: ${val}`}
-                      className="flex-1 min-w-[3px] rounded-t transition-all hover:scale-125"
-                      style={{
-                        height: `${normH}%`,
-                        backgroundColor: val > 0 ? "#00B1C9" : "#BA1A1A",
-                        opacity: 0.85
-                      }}
-                    ></div>
-                  );
-                })}
+            <div className="flex flex-col gap-2">
+              <div className="h-24 w-full flex items-end gap-px">
+                {(latent.full_latent_vector || DETERMINISTIC_INITIAL_PREDICTION.latent_embedding.full_latent_vector).map((val, idx) => (
+                  <div
+                    key={idx}
+                    title={`Dim ${idx}: ${val}`}
+                    className="flex-1 rounded-t-sm"
+                    style={{
+                      height: `${Math.min(100, Math.max(6, (Math.abs(val) / 2.5) * 100))}%`,
+                      backgroundColor: val > 0 ? "#00B1C9" : "#BA1A1A",
+                      opacity: 0.8
+                    }}
+                  ></div>
+                ))}
               </div>
-              <div className="flex justify-between items-center text-[10px] font-mono text-on-surface-variant">
+              <div className="flex justify-between text-body-sm text-on-surface-variant">
                 <span>Dim 0</span>
-                <span>Dim 64</span>
                 <span>Dim 127</span>
               </div>
             </div>
-          </div>
 
-          {similarMatches.length > 0 && (
-            <div className="pt-space-xs border-t border-surface-container-high/40 flex flex-col gap-space-xs">
-              <span className="font-label-technical text-label-technical uppercase text-secondary font-semibold">
-                Vector DB Similarity Search: Top Matching Historical Ocean Analogues
-              </span>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-space-sm">
-                {similarMatches.slice(0, 3).map((match, i) => (
-                  <div key={i} className="p-space-sm rounded bg-surface-container-low border border-surface-container-high/40 flex flex-col gap-1 text-xs">
-                    <div className="flex justify-between items-center font-mono">
-                      <span className="text-primary font-bold">{match.station_name}</span>
-                      <span className="text-secondary font-bold">{match.similarity_score_pct}% Match</span>
+            {similarMatches.length > 0 && (
+              <div className="flex flex-col gap-4 pt-6 border-t border-surface-container-high">
+                <h3 className="font-headline-sm text-headline-sm text-primary">Most similar past conditions</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {similarMatches.slice(0, 3).map((match, i) => (
+                    <div key={i} className="flex flex-col gap-1">
+                      <div className="flex justify-between items-baseline gap-3">
+                        <span className="text-body-md font-medium text-primary">{match.station_name}</span>
+                        <span className="text-body-sm font-mono text-secondary">{match.similarity_score_pct}%</span>
+                      </div>
+                      <p className="text-body-sm text-on-surface-variant leading-relaxed">{match.description}</p>
                     </div>
-                    <p className="text-[11px] text-on-surface-variant leading-tight">{match.description}</p>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </section>
+            )}
+          </div>
+        </Section>
 
-        {/* =======================================================================
-            INDEPENDENT INCOIS ARGO BUOY BENCHMARKS (Scatter Plot & Depth Chart)
-            ======================================================================= */}
-        <section id="benchmarks" className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-surface-container-high/60 flex flex-col gap-space-md">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-space-xs border-b border-surface-container-high/60 pb-space-sm">
-            <div>
-              <span className="font-label-technical text-label-technical uppercase tracking-wider text-secondary font-semibold block">
-                In-Situ Physical Validation
-              </span>
-              <h2 className="font-headline-md text-headline-md text-primary font-semibold">
-                Benchmarked Against 54,606 Independent INCOIS ARGO Buoy Floats
-              </h2>
-            </div>
-            <button
-              onClick={() => setShowScatterModal(!showScatterModal)}
-              className="px-3 py-1.5 bg-primary hover:bg-secondary text-on-primary text-xs font-semibold rounded transition shadow-sm"
-            >
-              {showScatterModal ? "Hide Scatter Plot" : "View Argo Scatter Plot"}
+        {/* Validation */}
+        <Section
+          id="validation"
+          title="Validation"
+          description="Checked against 54,606 independent INCOIS Argo float profiles."
+          actions={
+            <button onClick={() => setShowScatterModal(!showScatterModal)} className={ghostButton}>
+              <span className="material-symbols-outlined text-[18px]">scatter_plot</span>
+              {showScatterModal ? "Hide scatter plot" : "Show scatter plot"}
             </button>
-          </div>
+          }
+        >
+          <div className={`${card} overflow-hidden`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-body-md">
+                <thead>
+                  <tr className="border-b border-surface-container-high text-body-sm text-on-surface-variant">
+                    <th className="px-6 py-4 font-medium">Model</th>
+                    <th className="px-6 py-4 font-medium">Inputs</th>
+                    <th className="px-6 py-4 font-medium">GLORYS12 RMSE</th>
+                    <th className="px-6 py-4 font-medium">Argo RMSE</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-container-high">
+                  <tr>
+                    <td className="px-6 py-4 text-primary">SST-only MLP</td>
+                    <td className="px-6 py-4 text-on-surface-variant">SST</td>
+                    <td className="px-6 py-4 font-mono text-on-surface-variant">1.0440 °C</td>
+                    <td className="px-6 py-4 font-mono text-on-surface-variant">2.1450 °C</td>
+                  </tr>
+                  <tr>
+                    <td className="px-6 py-4 text-primary">Multi-variable MLP</td>
+                    <td className="px-6 py-4 text-on-surface-variant">SST, SSH, SSS, wind</td>
+                    <td className="px-6 py-4 font-mono text-on-surface-variant">1.0573 °C</td>
+                    <td className="px-6 py-4 font-mono text-on-surface-variant">1.7820 °C</td>
+                  </tr>
+                  <tr className="bg-secondary-container/15">
+                    <td className="px-6 py-4 text-primary font-medium">OceanEmbed CNN</td>
+                    <td className="px-6 py-4 text-primary">14-channel spatial patch</td>
+                    <td className="px-6 py-4 font-mono text-secondary">1.3892 °C</td>
+                    <td className="px-6 py-4 font-mono text-on-tertiary-container font-semibold">1.3892 °C</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
-          {/* Results Comparison Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left font-body-sm text-body-sm">
-              <thead>
-                <tr className="border-b border-surface-container-high text-secondary uppercase font-label-technical text-label-technical">
-                  <th className="pb-space-xs font-semibold">Model Architecture</th>
-                  <th className="pb-space-xs font-semibold">Input Telemetry</th>
-                  <th className="pb-space-xs font-semibold">GLORYS12 Val RMSE</th>
-                  <th className="pb-space-xs font-semibold">Independent INCOIS ARGO RMSE</th>
-                  <th className="pb-space-xs font-semibold">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-container-high/40">
-                <tr>
-                  <td className="py-2.5 font-medium text-primary">1. Baseline 1 (SST-Only MLP)</td>
-                  <td className="py-2.5 text-on-surface-variant">SST Surface Radiance</td>
-                  <td className="py-2.5 font-mono text-on-surface-variant">1.0440 °C</td>
-                  <td className="py-2.5 font-mono text-on-surface-variant">2.1450 °C</td>
-                  <td className="py-2.5">
-                    <span className="px-2 py-0.5 rounded bg-surface-container text-xs text-on-surface-variant">
-                      Baseline Safety
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td className="py-2.5 font-medium text-primary">2. Baseline 2 (Multi-Var MLP)</td>
-                  <td className="py-2.5 text-on-surface-variant">SST + SSH + SSS + Wind</td>
-                  <td className="py-2.5 font-mono text-on-surface-variant">1.0573 °C</td>
-                  <td className="py-2.5 font-mono text-on-surface-variant">1.7820 °C</td>
-                  <td className="py-2.5">
-                    <span className="px-2 py-0.5 rounded bg-surface-container text-xs text-on-surface-variant">
-                      Multi-Var Baseline
-                    </span>
-                  </td>
-                </tr>
-                <tr className="bg-secondary-container/15 font-semibold">
-                  <td className="py-2.5 text-primary flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-on-tertiary-container"></span>
-                    3. OceanEmbed Target CNN Architecture
-                  </td>
-                  <td className="py-2.5 text-primary">14-Channel Spatial Patch</td>
-                  <td className="py-2.5 font-mono text-secondary">1.3892 °C</td>
-                  <td className="py-2.5 font-mono text-on-tertiary-container font-bold">1.3892 °C</td>
-                  <td className="py-2.5">
-                    <span className="px-2 py-0.5 rounded bg-on-tertiary-container text-white text-xs font-semibold">
-                      Target SIH Model
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 px-6 py-6 border-t border-surface-container-high">
+              <Stat label="Surface RMSE" value="1.4315" unit="°C" />
+              <Stat label="100 m RMSE" value="1.5689" unit="°C" tone="text-secondary" />
+              <Stat label="1000 m RMSE" value="0.6813" unit="°C" tone="text-on-tertiary-container" />
+            </div>
 
-          {/* Predicted vs Observed Argo Float Scatter Plot Modal */}
-          {showScatterModal && (
-            <div className="p-space-md bg-surface-container-low rounded-xl border border-surface-container-high/60 flex flex-col gap-space-xs font-mono text-xs">
-              <div className="flex justify-between items-center border-b border-surface-container-high/40 pb-1">
-                <span className="text-primary font-bold">Predicted vs Observed Argo Float Temperature (°C) — 54,606 Points</span>
-                <span className="text-emerald-700 font-bold">R² = 0.942 • Bias = -0.012°C</span>
+            {showScatterModal && (
+              <div className="px-6 py-6 border-t border-surface-container-high flex flex-col gap-3">
+                <div className="flex flex-wrap justify-between gap-2 text-body-sm">
+                  <span className="text-primary font-medium">Predicted vs observed temperature</span>
+                  <span className="text-emerald-700">R² = 0.942 · bias −0.012 °C</span>
+                </div>
+                <svg className="w-full h-48" viewBox="0 0 400 160">
+                  <line x1="30" y1="130" x2="380" y2="20" stroke="#00B1C9" strokeDasharray="3 3" strokeWidth="1.5" />
+                  <text x="318" y="46" fill="#006686" fontSize="10">1:1 line</text>
+                  {[
+                    { x: 50, y: 115 }, { x: 70, y: 105 }, { x: 90, y: 92 }, { x: 120, y: 80 },
+                    { x: 150, y: 68 }, { x: 180, y: 55 }, { x: 210, y: 48 }, { x: 240, y: 40 },
+                    { x: 280, y: 32 }, { x: 320, y: 25 }, { x: 350, y: 21 }
+                  ].map((pt, i) => (
+                    <circle key={i} cx={pt.x} cy={pt.y} r="3" fill="#00253D" opacity="0.8" />
+                  ))}
+                </svg>
+                <div className="flex justify-between text-body-sm text-on-surface-variant">
+                  <span>4 °C observed</span>
+                  <span>31 °C observed</span>
+                </div>
               </div>
-              <svg className="w-full h-48 bg-surface-container-lowest rounded p-2" viewBox="0 0 400 160">
-                <line x1="30" y1="130" x2="380" y2="20" stroke="#00B1C9" strokeDasharray="3 3" strokeWidth="1.5" />
-                <text x="310" y="45" fill="#006686" fontSize="10" fontWeight="bold">1:1 Ideal Line</text>
-                
-                {/* Synthetic Scatter Points across 1:1 Line */}
-                {[
-                  { x: 50, y: 115 }, { x: 70, y: 105 }, { x: 90, y: 92 }, { x: 120, y: 80 },
-                  { x: 150, y: 68 }, { x: 180, y: 55 }, { x: 210, y: 48 }, { x: 240, y: 40 },
-                  { x: 280, y: 32 }, { x: 320, y: 25 }, { x: 350, y: 21 }
-                ].map((pt, i) => (
-                  <circle key={i} cx={pt.x} cy={pt.y} r="3" fill="#00253D" opacity="0.8" />
-                ))}
-              </svg>
-              <div className="flex justify-between text-[10px] text-on-surface-variant">
-                <span>Observed Argo Temp (4°C)</span>
-                <span>Observed Argo Temp (31°C)</span>
-              </div>
-            </div>
-          )}
-
-          {/* Depth Breakdown Badges */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-space-sm pt-space-xs">
-            <div className="bg-surface-container-low p-space-sm rounded border border-surface-container-high/40 flex justify-between items-center">
-              <div>
-                <span className="text-[10px] text-on-surface-variant uppercase font-mono block">Surface (0m) RMSE</span>
-                <span className="text-base font-bold text-primary font-mono">1.4315 °C</span>
-              </div>
-              <span className="text-xs text-secondary font-medium">Mixed Layer</span>
-            </div>
-            <div className="bg-surface-container-low p-space-sm rounded border border-surface-container-high/40 flex justify-between items-center">
-              <div>
-                <span className="text-[10px] text-on-surface-variant uppercase font-mono block">Thermocline (100m) RMSE</span>
-                <span className="text-base font-bold text-secondary font-mono">1.5689 °C</span>
-              </div>
-              <span className="text-xs text-secondary font-medium">Internal Waves</span>
-            </div>
-            <div className="bg-surface-container-low p-space-sm rounded border border-surface-container-high/40 flex justify-between items-center">
-              <div>
-                <span className="text-[10px] text-on-surface-variant uppercase font-mono block">Deep (1000m) RMSE</span>
-                <span className="text-base font-bold text-on-tertiary-container font-mono">0.6813 °C</span>
-              </div>
-              <span className="text-xs text-secondary font-medium">Abyssal Stability</span>
-            </div>
+            )}
           </div>
-        </section>
+        </Section>
       </main>
 
-      {/* =========================================================================
-          FOOTER (Strictly Team OceanSATX / SIH 2026 PS 26066)
-          ========================================================================= */}
-      <footer className="w-full bg-surface-container-low border-t border-surface-container-high/60 py-space-xl">
-        <div className="max-w-7xl mx-auto px-margin-desktop flex flex-col sm:flex-row items-center justify-between gap-space-md text-xs text-on-surface-variant">
-          <div className="flex items-center gap-space-sm">
-            <span className="font-headline-sm text-sm text-primary font-bold">OceanEmbed</span>
-            <span>•</span>
-            <span>Team OceanSATX</span>
-            <span>•</span>
-            <span>Smart India Hackathon (SIH) 2026 Problem Statement 26066</span>
-          </div>
-          <div className="flex items-center gap-space-md font-mono text-[11px]">
-            <span>Validated on 54,606 INCOIS ARGO Buoys</span>
-            <span>•</span>
-            <span className="text-secondary font-semibold">Bay of Bengal &amp; Arabian Sea</span>
-          </div>
+      <footer className="w-full border-t border-surface-container-high py-10">
+        <div className="max-w-7xl mx-auto px-margin-mobile sm:px-margin-desktop flex flex-col sm:flex-row items-center justify-between gap-3 text-body-sm text-on-surface-variant">
+          <span>
+            <span className="text-primary font-medium">OceanEmbed</span> · Team OceanSATX · SIH 2026, PS 26066
+          </span>
+          <span>Bay of Bengal &amp; Arabian Sea</span>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function Section({ id, title, description, actions, children }) {
+  return (
+    <section id={id} className="scroll-mt-24 flex flex-col gap-6">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="max-w-2xl">
+          <h2 className="font-headline-md text-headline-md text-primary">{title}</h2>
+          {description && <p className="mt-2 text-body-md text-on-surface-variant">{description}</p>}
+        </div>
+        {actions && <div className="shrink-0">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Stat({ label, value, unit, tone = "text-primary", note }) {
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <span className="text-body-sm text-on-surface-variant">{label}</span>
+      <span className={`font-data-metric text-data-metric ${tone}`}>
+        {value}
+        {unit && <span className="ml-1 text-body-md text-on-surface-variant">{unit}</span>}
+      </span>
+      {note && <p className="mt-1 text-body-sm text-on-surface-variant leading-relaxed">{note}</p>}
+    </div>
+  );
+}
+
+function Segmented({ options, value, onChange }) {
+  return (
+    <div className="inline-flex p-1 rounded-xl bg-surface-container-low border border-surface-container-high">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          onClick={() => onChange(option.value)}
+          className={`px-3 py-1.5 rounded-lg text-body-sm font-medium transition ${
+            value === option.value ? "bg-primary text-on-primary" : "text-on-surface-variant hover:text-primary"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
