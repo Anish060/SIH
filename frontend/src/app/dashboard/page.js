@@ -234,8 +234,9 @@ export default function OceanEmbedApp() {
   }, [params, customCoord]);
 
   // Fetch 3D Volume Slice & Vertical Cross-Section
-  const fetchVolumeSlice = useCallback((depthIdx, lat, lon, sst) => {
-    fetch(`/api/volume_slice?depth_idx=${depthIdx}&lat=${lat}&lon=${lon}&sst=${sst}`)
+  const fetchVolumeSlice = useCallback((depthIdx, lat, lon, surface) => {
+    const query = new URLSearchParams({ depth_idx: depthIdx, lat, lon, ...surface });
+    fetch(`/api/volume_slice?${query}`)
       .then((r) => r.json())
       .then((vData) => {
         if (vData.temperature_grid_c) setVolumeSliceGrid(vData);
@@ -281,8 +282,8 @@ export default function OceanEmbedApp() {
 
   // When depth slider or coordinate changes
   useEffect(() => {
-    fetchVolumeSlice(selectedDepthIdx, customCoord.lat, customCoord.lon, params.sst);
-  }, [selectedDepthIdx, customCoord, params.sst, fetchVolumeSlice]);
+    fetchVolumeSlice(selectedDepthIdx, customCoord.lat, customCoord.lon, params);
+  }, [selectedDepthIdx, customCoord, params, fetchVolumeSlice]);
 
   // Cyclone Storm Simulation Step Controller
   const activeCyclone = CYCLONE_SIMULATION_TRACKS[activeCycloneTrackId];
@@ -465,7 +466,9 @@ export default function OceanEmbedApp() {
     const depths = DEPTH_LEVELS;
 
     if (digitalTwinMode === "3d_volume") {
-      // 3D Volume Mesh Surface render
+      // 3D volume from the model's 9x9 grid of predicted profiles
+      const volume = volumeSliceGrid.volume_c;
+      if (!volume) return [];
       const xVals = [], yVals = [], zVals = [], tVals = [];
       depths.forEach((d, dIdx) => {
         lats.forEach((latVal, rIdx) => {
@@ -473,8 +476,7 @@ export default function OceanEmbedApp() {
             xVals.push(lonVal);
             yVals.push(latVal);
             zVals.push(-d);
-            const baseT = (prediction?.profile_celsius?.[dIdx] ?? 20) + 0.3 * Math.sin(rIdx + cIdx);
-            tVals.push(Number(baseT.toFixed(2)));
+            tVals.push(volume[dIdx][rIdx][cIdx]);
           });
         });
       });
@@ -653,7 +655,7 @@ export default function OceanEmbedApp() {
         <Section
           id="twin"
           title="3D temperature field"
-          description="The reconstructed volume around the probe, from the surface to 1000 m."
+          description="Model predictions on a 9 × 9 grid, 1° either side of the probe, from the surface to 1000 m."
           actions={
             <Segmented
               value={digitalTwinMode}
@@ -674,9 +676,9 @@ export default function OceanEmbedApp() {
                   autosize: true,
                   margin: { l: 10, r: 10, b: 10, t: 10 },
                   scene: {
-                    xaxis: { title: "Longitude (°E)", backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
-                    yaxis: { title: "Latitude (°N)", backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
-                    zaxis: { title: "Depth (m)", backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
+                    xaxis: { title: { text: "Longitude (°E)" }, backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
+                    yaxis: { title: { text: "Latitude (°N)" }, backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
+                    zaxis: { title: { text: "Depth (m)" }, backgroundcolor: "#EAF5FF", gridcolor: "#C7E7FE" },
                     camera: { eye: { x: 1.5, y: 1.5, z: 1.2 } }
                   },
                   paper_bgcolor: "rgba(0,0,0,0)",

@@ -552,29 +552,37 @@ def fetch_live_telemetry(lat: float = 14.5, lon: float = 88.0):
             }
         }
 
+def run_profiles(reqs: List[PredictRequest]):
+    """
+    Batched forward pass: returns (profiles_celsius [N, 15], latents [N, 128]).
+    Applies the same SST/SSH surface calibration used by /api/predict.
+    """
+    batch = torch.cat([construct_patch_tensor(r) for r in reqs], dim=0)
+    with torch.no_grad():
+        profile_out, latent_out = model(batch)
+
+    profiles = profile_out.cpu().numpy()
+    latents = latent_out.cpu().numpy()
+
+    # Physical calibration: Anchor surface temperature to target SST and scale thermal depth with SSH anomaly
+    for i, r in enumerate(reqs):
+        if r.sst is not None:
+            ssh_effect = float(r.ssh if r.ssh is not None else 0.0)
+            delta_sst = float(r.sst) - profiles[i, 0]
+            decay_scale = 160.0 + ssh_effect * 120.0
+            decay_weights = np.exp(-DEPTH_LEVELS / max(50.0, decay_scale))
+            profiles[i] = np.maximum(3.2, profiles[i] + delta_sst * decay_weights)
+
+    return profiles, latents
+
 @app.post("/api/predict")
 def predict_ocean_profile(req: PredictRequest):
     try:
-        # 1. Build input patch tensor
-        patch_tensor = construct_patch_tensor(req)
-        
-        # 2. Run model forward pass
-        with torch.no_grad():
-            profile_out, latent_out = model(patch_tensor)
-            
-        profile_celsius = profile_out.cpu().numpy().squeeze()
-        latent_vector = latent_out.cpu().numpy().squeeze()
-        
-        # Physical calibration: Anchor surface temperature to target SST and scale thermal depth with SSH anomaly
-        if req.sst is not None:
-            target_sst = float(req.sst)
-            ssh_effect = float(req.ssh if req.ssh is not None else 0.0)
-            delta_sst = target_sst - profile_celsius[0]
-            decay_scale = 160.0 + ssh_effect * 120.0
-            decay_weights = np.exp(-DEPTH_LEVELS / max(50.0, decay_scale))
-            profile_celsius = profile_celsius + delta_sst * decay_weights
-            profile_celsius = np.maximum(3.2, profile_celsius)
-        
+        # 1-2. Build input patch and run model (with surface calibration)
+        profiles, latents = run_profiles([req])
+        profile_celsius = profiles[0]
+        latent_vector = latents[0]
+
         # 3. Derive physical application metrics
         derived = derive_physical_metrics(profile_celsius, req.lat, req.lon)
         
@@ -839,35 +847,45 @@ def get_cyclone_tracks():
     return HISTORICAL_CYCLONES
 
 @app.get("/api/volume_slice")
-def get_3d_volume_slice(depth_idx: int = 7, lat: float = 14.5, lon: float = 88.0, sst: float = 27.5):
+def get_3d_volume_slice(
+    depth_idx: int = 7,
+    lat: float = 14.5,
+    lon: float = 88.0,
+    sst: float = 27.5,
+    ssh: float = 0.05,
+    sss: float = 0.02,
+    uo: float = -0.10,
+    vo: float = 0.05,
+    u10: float = -2.0,
+    v10: float = -3.0,
+):
     """
-    Returns a 2D spatial slice (9x9 grid) at the specified depth index (0 to 14),
-    along with full 3D volumetric field and vertical transect.
+    Runs the model on a 9x9 grid of points (±1° around the probe) in one batch
+    and returns the predicted 3D temperature volume, plus a horizontal slice at
+    the requested depth and a vertical transect along the central latitude.
+    Every grid point uses the probe's surface readings at its own coordinates.
     """
     idx = max(0, min(14, depth_idx))
     depth_m = int(DEPTH_LEVELS[idx])
-    
+
     lats = np.linspace(lat - 1.0, lat + 1.0, 9)
     lons = np.linspace(lon - 1.0, lon + 1.0, 9)
-    
-    # 2D Slice at requested depth
-    grid_slice = []
-    for r, y_lat in enumerate(lats):
-        row = []
-        for c, x_lon in enumerate(lons):
-            base_t = sst - (idx * 1.4) + 0.3 * np.sin(r + c)
-            row.append(round(float(max(4.0, base_t)), 2))
-        grid_slice.append(row)
-        
-    # Vertical Cross-Section Transect (15 Depths x 9 Longitude Nodes along central Lat)
-    vertical_transect = []
-    for d_i in range(15):
-        t_row = []
-        for c, x_lon in enumerate(lons):
-            t_val = sst - (d_i * 1.4) + 0.2 * np.cos(c)
-            t_row.append(round(float(max(3.5, t_val)), 2))
-        vertical_transect.append(t_row)
-        
+
+    try:
+        reqs = [
+            PredictRequest(lat=float(y), lon=float(x), sst=sst, ssh=ssh, sss=sss, uo=uo, vo=vo, u10=u10, v10=v10)
+            for y in lats for x in lons
+        ]
+        profiles, _ = run_profiles(reqs)  # (81, 15)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Volume inference error: {str(e)}")
+
+    # volume[d][r][c]: depth index, latitude row, longitude column
+    volume = profiles.reshape(9, 9, 15).transpose(2, 0, 1)
+
+    def rounded(a):
+        return np.round(a.astype(float), 2).tolist()
+
     return {
         "depth_index": idx,
         "depth_m": depth_m,
@@ -877,8 +895,10 @@ def get_3d_volume_slice(depth_idx: int = 7, lat: float = 14.5, lon: float = 88.0
         "lats": [round(float(l), 2) for l in lats],
         "lons": [round(float(l), 2) for l in lons],
         "depths_m": DEPTH_LEVELS.tolist(),
-        "temperature_grid_c": grid_slice,
-        "vertical_transect_c": vertical_transect
+        "source": "model",
+        "volume_c": rounded(volume),
+        "temperature_grid_c": rounded(volume[idx]),
+        "vertical_transect_c": rounded(volume[:, 4, :])
     }
 
 if __name__ == "__main__":
