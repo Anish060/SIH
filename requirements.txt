@@ -20,3 +20,17 @@ seaborn>=0.12.0
 # Copernicus Marine Service & ERA5 CDS APIs
 copernicusmarine>=1.0.0
 cdsapi>=0.6.1
+
+# Basin-wide inference output (NetCDF read/write)
+netCDF4>=1.6.0
+
+# Tests
+pytest>=7.0
+
+# Physics, ML baseline, admin health
+gsw>=3.6
+xgboost>=2.0
+psutil>=5.9
+scipy>=1.10
+# Argo float download (optional, needs network)
+# argopy>=0.1.15

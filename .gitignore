@@ -14,3 +14,8 @@ scratch/
 .idea/
 .env
 *.log
+
+# runtime state (users, secret key, job logs) and generated data
+state/
+basin_output/
+nrt_data/

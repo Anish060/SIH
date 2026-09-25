@@ -60,3 +60,9 @@
     animation: none;
   }
 }
+
+@media print {
+  header, .print\:hidden { display: none !important; }
+  body { background: #fff !important; }
+  main { padding-top: 0 !important; }
+}

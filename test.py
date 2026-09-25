@@ -43,11 +43,9 @@ class OceanEmbed(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten()
         )
-        self.embedding = nn.Sequential(
-            nn.Linear(128, embed_dim),
-            nn.LayerNorm(embed_dim),
-            nn.GELU()
-        )
+        # Must match the trained checkpoint exactly (kaggle_oceanembed_pipeline.py):
+        # a single Linear layer. No LayerNorm / GELU.
+        self.embedding = nn.Linear(128, embed_dim)
         self.decoder = nn.Sequential(
             nn.Linear(embed_dim, 256),
             nn.ReLU(),
@@ -63,23 +61,10 @@ class OceanEmbed(nn.Module):
         return profile, latent
 
 def load_checkpoint_flexibly(model_obj, checkpoint_path):
+    """Loads with strict=True so an architecture mismatch raises instead of silently
+    leaving layers untrained. (Name kept so existing calls still work.)"""
     state_dict = torch.load(checkpoint_path, map_location=device)
-    try:
-        model_obj.load_state_dict(state_dict)
-    except RuntimeError:
-        new_state = {}
-        for k, v in state_dict.items():
-            if k == "embedding.weight":
-                new_state["embedding.0.weight"] = v
-            elif k == "embedding.bias":
-                new_state["embedding.0.bias"] = v
-            elif k == "embedding.0.weight":
-                new_state["embedding.weight"] = v
-            elif k == "embedding.0.bias":
-                new_state["embedding.bias"] = v
-            else:
-                new_state[k] = v
-        model_obj.load_state_dict(new_state, strict=False)
+    model_obj.load_state_dict(state_dict, strict=True)
 
 # =============================================================================
 # 2. TRAINING SET NORMALIZATION STATISTICS (From Real NetCDF Ingestion)
@@ -95,7 +80,8 @@ STATS = {
 }
 
 # =============================================================================
-# 3. CONSTRUCT REALISTIC PHYSICAL SURFACE DATA FOR A 31x31 OCEAN PATCH
+# 3. SYNTHETIC SMOKE-TEST PATCH (checks the model loads and runs; NOT a prediction of any real ocean state;
+#    for real predictions use basin_inference.py on real NetCDF inputs)
 # =============================================================================
 H, W = 31, 31
 y_grid, x_grid = np.meshgrid(np.linspace(-1, 1, H), np.linspace(-1, 1, W), indexing='ij')
@@ -116,7 +102,7 @@ raw_fields = {
 
 # Print sample physical values at patch center (pixel 15, 15)
 print("\n" + "=" * 65)
-print("REALISTIC PHYSICAL SURFACE INPUTS AT PATCH CENTER (15, 15)")
+print("SYNTHETIC SMOKE-TEST INPUTS AT PATCH CENTER (15, 15) - not real data")
 print("=" * 65)
 print(f"  1. Sea Surface Temperature (SST): {raw_sst[15,15] - 273.15:.2f} °C ({raw_sst[15,15]:.2f} K)")
 print(f"  2. Sea Surface Height (SSH)     : {raw_ssh[15,15]:.3f} m")
@@ -179,7 +165,7 @@ print("\n" + "=" * 65)
 print("MODEL OUTPUT 1: PREDICTED SUBSURFACE TEMPERATURE PROFILE (°C)")
 print("=" * 65)
 for depth, temp in zip(DEPTH_LEVELS, profile_celsius):
-    layer_name = "Surface" if depth == 0 else ("Thermocline" if 30 <= depth <= 150 else "Deep Ocean")
+    layer_name = "Surface" if depth == 0 else ("Mixed Layer" if depth < 30 else ("Thermocline" if depth <= 150 else "Deep Ocean"))
     print(f"  Depth {depth:4d} m ({layer_name:11s}) : {temp:6.2f} °C")
 print("=" * 65)
 

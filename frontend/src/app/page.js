@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useLiveExample, LiveInputs, LiveProfile, LiveValidation } from "./LiveExample";
 
 // ---------------------------------------------------------------------------
 // Ocean cross-section used as the hero image. Isotherms are generated once at
@@ -29,78 +32,39 @@ const xs = Array.from({ length: W / 20 + 1 }, (_, i) => i * 20);
 const linePath = (fn) => xs.map((x, i) => `${i ? "L" : "M"}${x},${fn(x).toFixed(1)}`).join(" ");
 const areaPath = (fn) => `${linePath(fn)} L${W},${H} L0,${H} Z`;
 
-// Example output for the "how it works" section (Central Bay of Bengal).
-const DEPTHS = [0, 5, 10, 20, 30, 50, 75, 100, 125, 150, 200, 300, 500, 750, 1000];
-const PROFILE = [29.25, 29.2, 29.12, 28.85, 27.8, 24.5, 20.1, 16.3, 13.5, 11.8, 9.7, 7.2, 5.1, 4.2, 3.4];
-
-const INPUTS = [
-  ["Sea surface temperature", "29.8 °C", "OSTIA"],
-  ["Sea surface height", "+0.22 m", "CMEMS"],
-  ["Salinity anomaly", "+0.01 PSU", "CMEMS"],
-  ["Eastward current", "−0.18 m/s", "CMEMS"],
-  ["Northward current", "+0.12 m/s", "CMEMS"],
-  ["Eastward wind", "−4.5 m/s", "ERA5"],
-  ["Northward wind", "−6.2 m/s", "ERA5"]
-];
-
 const USES = [
   {
     name: "Cyclone forecasting",
     what: "How much heat sits above the 26 °C line, and how deep it goes. That heat is the fuel a storm burns on its way to landfall.",
-    example: "112 kJ/cm²",
-    exampleNote: "under Amphan the day it hit Category 5",
+    example: "TCHP · D26",
+    exampleNote: "heat above the 26 °C isotherm",
     tone: "text-rose-300"
   },
   {
-    name: "Naval sonar",
-    what: "Where the thermocline is sharpest. Sound bends there, and leaves a band that surface sonar can't reach.",
-    example: "75–150 m",
-    exampleNote: "shadow zone in the south-west Bay",
+    name: "Underwater sound",
+    what: "Sound speed follows temperature. We compute the sonic layer depth, below which sound bends downward and leaves a shadow zone.",
+    example: "SLD",
+    exampleNote: "Mackenzie (1981) sound speed",
     tone: "text-purple-300"
   },
   {
     name: "Fisheries",
-    what: "Cold water rising near the coast brings nutrients, and fish follow. We flag it, and how far it is from the maritime boundary.",
-    example: "+4.75 °C",
-    exampleNote: "upwelling off Visakhapatnam",
+    what: "Upwelling lifts the thermocline toward the surface. We map how deep the 20 °C water sits, which can be combined with chlorophyll data to find fishing zones.",
+    example: "D20",
+    exampleNote: "20 °C isotherm depth, per cell",
     tone: "text-emerald-300"
   },
   {
     name: "Finding similar days",
-    what: "Every profile is also stored as a 128-number fingerprint, so you can ask which past days looked most like today.",
-    example: "99.7%",
-    exampleNote: "closest match in the archive",
+    what: "Every cell is also summarised as a 128-number embedding, so you can ask which other places and days looked most alike.",
+    example: "128-D",
+    exampleNote: "cosine similarity search",
     tone: "text-cyan-300"
   }
 ];
 
-function ProfileChart() {
-  // Depth on a square-root scale so the busy upper 200 m gets room.
-  const px = (t) => 16 + ((t - 2) / (31 - 2)) * 268;
-  const py = (d) => 12 + Math.sqrt(d / 1000) * 296;
-  const d = PROFILE.map((t, i) => `${i ? "L" : "M"}${px(t).toFixed(1)},${py(DEPTHS[i]).toFixed(1)}`).join(" ");
-
-  return (
-    <svg viewBox="0 0 300 330" className="w-full h-auto" role="img" aria-label="Predicted temperature falling from 29 °C at the surface to 3 °C at 1000 m">
-      {[0, 100, 500, 1000].map((depth) => (
-        <g key={depth}>
-          <line x1="16" x2="284" y1={py(depth)} y2={py(depth)} stroke="#D3EBFF" strokeWidth="1" />
-          <text x="284" y={py(depth) - 5} textAnchor="end" fontSize="10" fill="#42474E">
-            {depth === 0 ? "surface" : `${depth} m`}
-          </text>
-        </g>
-      ))}
-      <path d={d} fill="none" stroke="#00B1C9" strokeWidth="2.5" strokeLinejoin="round" className="landing-draw" pathLength={1} />
-      {PROFILE.map((t, i) => (
-        <circle key={i} cx={px(t)} cy={py(DEPTHS[i])} r="2.6" fill="#00253D" />
-      ))}
-      <text x={px(PROFILE[0]) - 6} y={py(0) + 16} textAnchor="end" fontSize="11" fontWeight="600" fill="#00253D">29.3 °C</text>
-      <text x={px(PROFILE[14]) + 8} y={py(1000) - 6} fontSize="11" fontWeight="600" fill="#00253D">3.4 °C</text>
-    </svg>
-  );
-}
-
 export default function LandingPage() {
+  const live = useLiveExample();
   return (
     <div className="min-h-screen bg-surface text-on-surface flex flex-col selection:bg-secondary-container selection:text-on-secondary-container">
       <header className="w-full">
@@ -187,12 +151,12 @@ export default function LandingPage() {
             <rect x={PROBE_X + 10} y="4.5" width="12" height="4" fill="#00B1C9" />
             <circle cx={PROBE_X} cy={surfaceY(PROBE_X)} r="4" fill="#00253D" stroke="#FFFFFF" strokeWidth="1.5" />
             <text x={PROBE_X - 12} y={surfaceY(PROBE_X) + 22} textAnchor="end" fontSize="12" fill="#FFFFFF" fontWeight="600">
-              14.5°N 88.0°E
+              Schematic, not data
             </text>
 
             <text x="24" y={H - 16} fontSize="12" fill="#FFFFFF" fillOpacity="0.8">1,000 m</text>
           </svg>
-          <figcaption className="sr-only">Illustrative cross-section of the Central Bay of Bengal.</figcaption>
+          <figcaption className="sr-only">Schematic illustration of ocean layering; not model output.</figcaption>
         </figure>
 
         {/* How it works */}
@@ -203,15 +167,9 @@ export default function LandingPage() {
             </h2>
 
             <div className="mt-14 grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-10 items-start">
-              <dl className="lg:col-span-5 divide-y divide-surface-container-high border-y border-surface-container-high">
-                {INPUTS.map(([label, value, source]) => (
-                  <div key={label} className="flex items-baseline gap-4 py-3">
-                    <dt className="flex-1 text-body-md text-on-surface">{label}</dt>
-                    <dd className="font-mono text-body-md text-primary tabular-nums">{value}</dd>
-                    <dd className="w-14 text-right text-body-sm text-on-surface-variant">{source}</dd>
-                  </div>
-                ))}
-              </dl>
+              <div className="lg:col-span-5">
+                <LiveInputs state={live} />
+              </div>
 
               <div className="lg:col-span-3 flex flex-col gap-4 lg:pt-2">
                 <span className="material-symbols-outlined text-[28px] text-on-tertiary-container hidden lg:inline-block" aria-hidden="true">
@@ -227,16 +185,12 @@ export default function LandingPage() {
               </div>
 
               <div className="lg:col-span-4 w-full max-w-sm lg:max-w-none">
-                <ProfileChart />
-                <p className="mt-3 text-body-sm text-on-surface-variant">
-                  Predicted profile for these readings, Central Bay of Bengal.
-                </p>
+                <LiveProfile state={live} />
               </div>
             </div>
 
             <p className="mt-20 sm:mt-28 max-w-[34ch] font-headline-md text-[26px] leading-[34px] sm:text-[32px] sm:leading-[42px] text-primary tracking-[-0.015em] [text-wrap:balance]">
-              We tested it against <span className="text-secondary">54,606 Argo float profiles</span> it had never
-              seen. At 1,000 m it is off by about <span className="text-secondary">0.7 °C</span>.
+              Trained on GLORYS12 reanalysis, checked against days it never saw. <LiveValidation state={live} />
             </p>
             <Link href="/dashboard#validation" className="mt-5 inline-flex items-center gap-1 text-body-md font-medium text-secondary hover:text-primary transition-colors">
               See the validation numbers

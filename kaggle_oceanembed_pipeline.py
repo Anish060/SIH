@@ -84,10 +84,17 @@ PRODUCT_CATALOG = {
         "dataset_id": "METOFFICE-GLO-SST-L4-REP-OBS-SST",
         "vars": ["analysed_sst"]
     },
+    # GLOBAL_ANALYSISFORECAST_PHY_001_024 splits variables across datasets: the "-cur" dataset holds
+    # only uo/vo, salinity is in "-so", and sea-surface height (zos) is in the 2D "phy_anfc" dataset.
+    # They are downloaded separately and merged into COPERNICUS_CURRENTS_SSH.nc. Only the top level
+    # (~0.49 m) is used by the model, so depth is limited to 0-1 m.
     "COPERNICUS_CURRENTS_SSH": {
         "product_id": "GLOBAL_ANALYSISFORECAST_PHY_001_024",
-        "dataset_id": "cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m",
-        "vars": ["uo", "vo", "zos", "so"]
+        "parts": [
+            {"dataset_id": "cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m", "vars": ["uo", "vo"], "surface_only": True},
+            {"dataset_id": "cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m", "vars": ["so"], "surface_only": True},
+            {"dataset_id": "cmems_mod_glo_phy_anfc_0.083deg_P1D-m", "vars": ["zos"], "surface_only": False},
+        ]
     }
 }
 
@@ -171,20 +178,30 @@ class OceanDataFetcher:
                     continue
                     
                 print(f"    - Subsetting Copernicus {key} -> {out_path}")
-                
-                kwargs = {
-                    "dataset_id": cfg["dataset_id"],
-                    "variables": cfg["vars"],
+                base = {
                     "minimum_latitude": LAT_MIN, "maximum_latitude": LAT_MAX,
                     "minimum_longitude": LON_MIN, "maximum_longitude": LON_MAX,
                     "start_datetime": start_date, "end_datetime": end_date,
-                    "output_directory": self.output_dir, "output_filename": f"{key}.nc"
+                    "output_directory": self.output_dir,
                 }
-                if key in ["GLORYS12V1", "COPERNICUS_CURRENTS_SSH"]:
-                    kwargs["minimum_depth"] = 0.0
-                    kwargs["maximum_depth"] = 1000.0
-                    
-                copernicusmarine.subset(**kwargs)
+                if "parts" in cfg:
+                    part_files = []
+                    for i, part in enumerate(cfg["parts"]):
+                        kw = dict(base, dataset_id=part["dataset_id"], variables=part["vars"],
+                                  output_filename=f"{key}_part{i}.nc")
+                        if part["surface_only"]:
+                            kw["minimum_depth"], kw["maximum_depth"] = 0.0, 1.0
+                        copernicusmarine.subset(**kw)
+                        part_files.append(os.path.join(self.output_dir, f"{key}_part{i}.nc"))
+                    merged = xr.merge([xr.open_dataset(f) for f in part_files], compat="override", join="exact")
+                    merged.to_netcdf(out_path)
+                    merged.close()
+                    print(f"[✔] Merged {[os.path.basename(f) for f in part_files]} -> {os.path.basename(out_path)}")
+                else:
+                    kw = dict(base, dataset_id=cfg["dataset_id"], variables=cfg["vars"], output_filename=f"{key}.nc")
+                    if key == "GLORYS12V1":
+                        kw["minimum_depth"], kw["maximum_depth"] = 0.0, 1100.0   # include the level below 1000 m for interpolation
+                    copernicusmarine.subset(**kw)
         except Exception as e:
             print(f"[!] Copernicus API download error: {e}")
 
@@ -314,6 +331,33 @@ class DataHarmonizer:
         norm_arr = norm_arr * mask
         return norm_arr, mask
 
+# -----------------------------------------------------------------------------
+# Strict input checks. No silent fallbacks: a missing variable or a date the file
+# does not cover must stop the run, not quietly substitute another field/day.
+# -----------------------------------------------------------------------------
+def require_var(ds, candidates):
+    """Returns the first name in `candidates` present in ds, else raises with what IS in the file."""
+    if isinstance(candidates, str):
+        candidates = [candidates]
+    for c in candidates:
+        if c in ds.data_vars:
+            return c
+    raise KeyError(f"[!] None of {candidates} found. Variables in this file: {list(ds.data_vars)}. "
+                   f"Refusing to guess (a positional fallback would silently feed the wrong physical field).")
+
+def check_time_coverage(da, dates, label, tolerance=pd.Timedelta("1D")):
+    """Raises unless every requested date has a sample within `tolerance` (no nearest-day extrapolation)."""
+    if 'time' not in da.dims:
+        raise ValueError(f"[!] {label}: no time dimension; daily data required.")
+    t = pd.DatetimeIndex(pd.to_datetime(da['time'].values)).sort_values()
+    idx = t.get_indexer(pd.DatetimeIndex(dates), method="nearest")
+    gaps = np.abs((t[idx] - pd.DatetimeIndex(dates)).to_numpy())
+    if (gaps >= tolerance.to_timedelta64()).any():
+        bad = [str(d.date()) for d, g in zip(dates, gaps) if g >= tolerance.to_timedelta64()]
+        raise ValueError(f"[!] {label}: file covers {t[0]}..{t[-1]} but these requested dates have no sample "
+                         f"within {tolerance}: {bad[:5]}{' ...' if len(bad) > 5 else ''}")
+
+
 def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date="2023-01-01", end_date="2023-01-30"):
     """
     Opens NetCDF files, standardizes coordinates (converting valid_time/TIME to time),
@@ -329,16 +373,17 @@ def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date
     print(f"[+] Datetime Alignment Index: {len(common_dates)} daily steps ({start_date} to {end_date})")
     
     def get_standardized_da(ds, var_name):
-        v = var_name if var_name in ds else list(ds.data_vars)[0]
+        v = require_var(ds, var_name)
         da = ds[v]
         da = standardize_coords(da)
+        check_time_coverage(da, common_dates, v)
         if 'time' in da.dims:
             da = da.interp(time=common_dates, method="nearest", kwargs={"fill_value": "extrapolate"})
         return da
 
     # 2. Open NetCDF DataArrays & Standardize Coordinates
     ds_sst = xr.open_dataset(os.path.join(data_dir, "OSTIA_SST.nc"))
-    var_sst = "analysed_sst" if "analysed_sst" in ds_sst else list(ds_sst.data_vars)[0]
+    var_sst = require_var(ds_sst, "analysed_sst")
     da_sst = get_standardized_da(ds_sst, var_sst)
     
     curr_path = os.path.join(data_dir, "COPERNICUS_CURRENTS_SSH.nc")
@@ -346,10 +391,10 @@ def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date
         curr_path = os.path.join(data_dir, "COPERNICUS_CURRENTS.nc")
         
     ds_curr = xr.open_dataset(curr_path)
-    zos_v = "zos" if "zos" in ds_curr else list(ds_curr.data_vars)[0]
-    sss_v = "so" if "so" in ds_curr else ("sss" if "sss" in ds_curr else list(ds_curr.data_vars)[1])
-    uo_v = "uo" if "uo" in ds_curr else list(ds_curr.data_vars)[2]
-    vo_v = "vo" if "vo" in ds_curr else list(ds_curr.data_vars)[3]
+    zos_v = require_var(ds_curr, "zos")
+    sss_v = require_var(ds_curr, ["so", "sss"])
+    uo_v = require_var(ds_curr, "uo")
+    vo_v = require_var(ds_curr, "vo")
     
     da_ssh = get_standardized_da(ds_curr, zos_v)
     da_sss = get_standardized_da(ds_curr, sss_v)
@@ -367,15 +412,15 @@ def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date
     elif 'depth' in da_vo.coords: da_vo = da_vo.isel(depth=0)
 
     ds_winds = xr.open_dataset(os.path.join(data_dir, "ERA5_WINDS.nc"))
-    u10_v = "u10" if "u10" in ds_winds else list(ds_winds.data_vars)[0]
-    v10_v = "v10" if "v10" in ds_winds else list(ds_winds.data_vars)[1]
+    u10_v = require_var(ds_winds, "u10")
+    v10_v = require_var(ds_winds, "v10")
     
     da_u10 = get_standardized_da(ds_winds, u10_v)
     da_v10 = get_standardized_da(ds_winds, v10_v)
     
     # 3. GLORYS12V1 Subsurface Target & Explicit Vertical Depth Interpolation WITH EXTRAPOLATION FOR 0m LEVEL
     ds_glorys = xr.open_dataset(os.path.join(data_dir, "GLORYS12V1.nc"))
-    thetao_v = "thetao" if "thetao" in ds_glorys else list(ds_glorys.data_vars)[0]
+    thetao_v = require_var(ds_glorys, "thetao")
     da_thetao = standardize_coords(ds_glorys[thetao_v])
     
     depth_dim = 'depth' if ('depth' in da_thetao.coords or 'depth' in da_thetao.dims) else None
@@ -383,6 +428,7 @@ def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date
         print(f"[+] Interpolating GLORYS thetao along depth dimension '{depth_dim}' onto 15 target levels (with 0m extrapolation)...")
         da_thetao = da_thetao.interp({depth_dim: DEPTH_LEVELS}, method="linear", kwargs={"fill_value": "extrapolate"})
         
+    check_time_coverage(da_thetao, common_dates, thetao_v)
     if 'time' in da_thetao.dims:
         da_thetao = da_thetao.interp(time=common_dates, method="nearest", kwargs={"fill_value": "extrapolate"})
 
@@ -614,7 +660,7 @@ def evaluate_against_incois_argo(model, surface_tensor_4d, common_dates, harmoni
     argo_path = os.path.join(data_dir, "INCOIS_ARGO.nc")
     
     ds_argo = xr.open_dataset(argo_path)
-    argo_var = "temp" if "temp" in ds_argo else list(ds_argo.data_vars)[0]
+    argo_var = require_var(ds_argo, "temp")
     da_argo = standardize_coords(ds_argo[argo_var])
     
     depth_dim = 'depth' if ('depth' in da_argo.coords or 'depth' in da_argo.dims) else None
@@ -827,23 +873,10 @@ def run_pipeline():
     print(f"\n[✔] Training Complete! Best OceanEmbed weights saved to '{best_model_path}'.")
     
     def load_checkpoint_flexibly(model_obj, checkpoint_path):
+        """Loads with strict=True so an architecture mismatch raises instead of silently
+        leaving layers untrained. (Name kept so existing calls still work.)"""
         state_dict = torch.load(checkpoint_path, map_location=device)
-        try:
-            model_obj.load_state_dict(state_dict)
-        except RuntimeError:
-            new_state = {}
-            for k, v in state_dict.items():
-                if k == "embedding.weight":
-                    new_state["embedding.0.weight"] = v
-                elif k == "embedding.bias":
-                    new_state["embedding.0.bias"] = v
-                elif k == "embedding.0.weight":
-                    new_state["embedding.weight"] = v
-                elif k == "embedding.0.bias":
-                    new_state["embedding.bias"] = v
-                else:
-                    new_state[k] = v
-            model_obj.load_state_dict(new_state, strict=False)
+        model_obj.load_state_dict(state_dict, strict=True)
 
     # Load best checkpoint safely with map_location and evaluate TRUE unweighted RMSE
     load_checkpoint_flexibly(model, best_model_path)

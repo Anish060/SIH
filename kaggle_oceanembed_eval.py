@@ -126,21 +126,54 @@ class DataHarmonizer:
         norm_arr = (clean_arr - mean) / (std + 1e-6)
         return norm_arr * mask, mask
 
-def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date="2023-01-01", end_date="2023-01-30"):
+# -----------------------------------------------------------------------------
+# Strict input checks. No silent fallbacks: a missing variable or a date the file
+# does not cover must stop the run, not quietly substitute another field/day.
+# -----------------------------------------------------------------------------
+def require_var(ds, candidates):
+    """Returns the first name in `candidates` present in ds, else raises with what IS in the file."""
+    if isinstance(candidates, str):
+        candidates = [candidates]
+    for c in candidates:
+        if c in ds.data_vars:
+            return c
+    raise KeyError(f"[!] None of {candidates} found. Variables in this file: {list(ds.data_vars)}. "
+                   f"Refusing to guess (a positional fallback would silently feed the wrong physical field).")
+
+def check_time_coverage(da, dates, label, tolerance=pd.Timedelta("1D")):
+    """Raises unless every requested date has a sample within `tolerance` (no nearest-day extrapolation)."""
+    if 'time' not in da.dims:
+        raise ValueError(f"[!] {label}: no time dimension; daily data required.")
+    t = pd.DatetimeIndex(pd.to_datetime(da['time'].values)).sort_values()
+    idx = t.get_indexer(pd.DatetimeIndex(dates), method="nearest")
+    gaps = np.abs((t[idx] - pd.DatetimeIndex(dates)).to_numpy())
+    if (gaps >= tolerance.to_timedelta64()).any():
+        bad = [str(d.date()) for d, g in zip(dates, gaps) if g >= tolerance.to_timedelta64()]
+        raise ValueError(f"[!] {label}: file covers {t[0]}..{t[-1]} but these requested dates have no sample "
+                         f"within {tolerance}: {bad[:5]}{' ...' if len(bad) > 5 else ''}")
+
+
+def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date="2023-01-01", end_date="2023-01-30",
+                                   fixed_stats=None, reference_file="GLORYS12V1.nc", reference_var="thetao"):
+    """fixed_stats: {var: (mean, std)} from the training period. Pass it for any period other than the
+    training range so inputs are normalised exactly as in training (otherwise stats are recomputed on
+    the first 80% of this range, which is only correct for the training range itself).
+    reference_file/var: the subsurface temperature used as target / comparison (GLORYS12 for training)."""
     print(f"\n[+] Ingesting & Harmonizing NetCDF datasets from: {data_dir}")
     harmonizer = DataHarmonizer()
     common_dates = pd.date_range(start=start_date, end=end_date, freq="1D")
     
     def get_standardized_da(ds, var_name):
-        v = var_name if var_name in ds else list(ds.data_vars)[0]
+        v = require_var(ds, var_name)
         da = ds[v]
         da = standardize_coords(da)
+        check_time_coverage(da, common_dates, v)
         if 'time' in da.dims:
             da = da.interp(time=common_dates, method="nearest", kwargs={"fill_value": "extrapolate"})
         return da
 
     ds_sst = xr.open_dataset(os.path.join(data_dir, "OSTIA_SST.nc"))
-    var_sst = "analysed_sst" if "analysed_sst" in ds_sst else list(ds_sst.data_vars)[0]
+    var_sst = require_var(ds_sst, "analysed_sst")
     da_sst = get_standardized_da(ds_sst, var_sst)
     
     curr_path = os.path.join(data_dir, "COPERNICUS_CURRENTS_SSH.nc")
@@ -148,10 +181,10 @@ def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date
         curr_path = os.path.join(data_dir, "COPERNICUS_CURRENTS.nc")
         
     ds_curr = xr.open_dataset(curr_path)
-    zos_v = "zos" if "zos" in ds_curr else list(ds_curr.data_vars)[0]
-    sss_v = "so" if "so" in ds_curr else ("sss" if "sss" in ds_curr else list(ds_curr.data_vars)[1])
-    uo_v = "uo" if "uo" in ds_curr else list(ds_curr.data_vars)[2]
-    vo_v = "vo" if "vo" in ds_curr else list(ds_curr.data_vars)[3]
+    zos_v = require_var(ds_curr, "zos")
+    sss_v = require_var(ds_curr, ["so", "sss"])
+    uo_v = require_var(ds_curr, "uo")
+    vo_v = require_var(ds_curr, "vo")
     
     da_ssh = get_standardized_da(ds_curr, zos_v)
     da_sss = get_standardized_da(ds_curr, sss_v)
@@ -166,18 +199,19 @@ def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date
     elif 'depth' in da_vo.coords: da_vo = da_vo.isel(depth=0)
 
     ds_winds = xr.open_dataset(os.path.join(data_dir, "ERA5_WINDS.nc"))
-    u10_v = "u10" if "u10" in ds_winds else list(ds_winds.data_vars)[0]
-    v10_v = "v10" if "v10" in ds_winds else list(ds_winds.data_vars)[1]
+    u10_v = require_var(ds_winds, "u10")
+    v10_v = require_var(ds_winds, "v10")
     da_u10 = get_standardized_da(ds_winds, u10_v)
     da_v10 = get_standardized_da(ds_winds, v10_v)
     
-    ds_glorys = xr.open_dataset(os.path.join(data_dir, "GLORYS12V1.nc"))
-    thetao_v = "thetao" if "thetao" in ds_glorys else list(ds_glorys.data_vars)[0]
+    ds_glorys = xr.open_dataset(os.path.join(data_dir, reference_file))
+    thetao_v = require_var(ds_glorys, reference_var)
     da_thetao = standardize_coords(ds_glorys[thetao_v])
     
     depth_dim = 'depth' if ('depth' in da_thetao.coords or 'depth' in da_thetao.dims) else None
     if depth_dim:
         da_thetao = da_thetao.interp({depth_dim: DEPTH_LEVELS}, method="linear", kwargs={"fill_value": "extrapolate"})
+    check_time_coverage(da_thetao, common_dates, thetao_v)
     if 'time' in da_thetao.dims:
         da_thetao = da_thetao.interp(time=common_dates, method="nearest", kwargs={"fill_value": "extrapolate"})
 
@@ -195,7 +229,11 @@ def build_ocean_fields_from_netcdf(data_dir="/kaggle/tmp/ocean_data", start_date
         name: np.array([ensure_2d_surface(harmonizer.regrid_dataarray(da.isel(time=t) if 'time' in da.dims else da)) for t in range(num_train_t)])
         for name, da in zip(var_list, da_list)
     }
-    harmonizer.compute_train_statistics(unnorm_train_dict)
+    if fixed_stats is not None:
+        harmonizer.stats = {k: (float(v[0]), float(v[1])) for k, v in fixed_stats.items()}
+        print("[+] Using fixed training-period normalisation statistics (not recomputed).")
+    else:
+        harmonizer.compute_train_statistics(unnorm_train_dict)
     
     all_surface_tensors, all_target_tensors = [], []
     for t_idx in range(len(common_dates)):
@@ -292,11 +330,9 @@ class OceanEmbed(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten()
         )
-        self.embedding = nn.Sequential(
-            nn.Linear(128, embed_dim),
-            nn.LayerNorm(embed_dim),
-            nn.GELU()
-        )
+        # Must match the trained checkpoint exactly (kaggle_oceanembed_pipeline.py):
+        # a single Linear layer. No LayerNorm / GELU.
+        self.embedding = nn.Linear(128, embed_dim)
         self.decoder = nn.Sequential(
             nn.Linear(embed_dim, 256),
             nn.ReLU(),
@@ -316,213 +352,175 @@ class OceanEmbed(nn.Module):
 # =============================================================================
 
 def evaluate_model_rmse_true(model_obj, val_loader, model_type="oceanembed"):
+    """Unweighted RMSE (°C) over all validation samples and levels, plus RMSE per level."""
     model_obj.eval()
-    se_sum = 0.0
-    total_count = 0
+    se_depth = torch.zeros(NUM_DEPTHS, dtype=torch.float64)
+    n = 0
     center_idx = 31 // 2
-    
     with torch.no_grad():
         for patches, targets in val_loader:
             targets = targets.to(device)
             if model_type == "b1":
-                inp = patches[:, 0:1, center_idx, center_idx].to(device)
-                preds = model_obj(inp)
+                preds = model_obj(patches[:, 0:1, center_idx, center_idx].to(device))
             elif model_type == "b2":
-                inp = patches[:, [0, 2, 4, 6, 8, 10, 12], center_idx, center_idx].to(device)
-                preds = model_obj(inp)
+                preds = model_obj(patches[:, [0, 2, 4, 6, 8, 10, 12], center_idx, center_idx].to(device))
             else:
-                inp = patches.to(device)
-                preds, _ = model_obj(inp)
-                
-            se_sum += ((preds - targets) ** 2).sum().item()
-            total_count += targets.numel()
-            
-    true_rmse = np.sqrt(se_sum / max(1, total_count))
-    return true_rmse
+                preds, _ = model_obj(patches.to(device))
+            se_depth += ((preds - targets) ** 2).sum(dim=0).double().cpu()
+            n += targets.shape[0]
+    per_depth = torch.sqrt(se_depth / max(1, n)).numpy()
+    overall = float(np.sqrt(se_depth.sum().item() / max(1, n * NUM_DEPTHS)))
+    return overall, per_depth.tolist()
 
-def evaluate_against_incois_argo(model, surface_tensor_4d, common_dates, harmonizer, patch_size=31, data_dir="/kaggle/tmp/ocean_data", batch_size=256):
-    print("\n[+] Running Memory-Efficient Timestamp-Matched Gridded INCOIS ARGO Evaluation...")
+
+def evaluate_against_incois_argo(model, surface_tensor_4d, common_dates, harmonizer, patch_size=31,
+                                 data_dir="/kaggle/tmp/ocean_data", batch_size=256, scatter_n=3000):
+    """
+    Compares predictions with the INCOIS gridded Argo product (incois_argo_mnt_VAM).
+    That product is a MONTHLY gridded analysis of Argo data, not individual float profiles, so:
+      * each validation day is matched to the monthly field covering it (tolerance 31 days, reported);
+      * the unit counted is "grid-cell-days", not "profiles";
+      * levels outside the product's depth range are NOT extrapolated; they are left out per level.
+    Returns a dict of statistics (or None if the file is missing).
+    """
+    print("\n[+] Comparing with the INCOIS gridded monthly Argo analysis...")
     argo_path = os.path.join(data_dir, "INCOIS_ARGO.nc")
-    
     if not os.path.exists(argo_path):
-        print(f"[!] INCOIS ARGO NetCDF not found at {argo_path}. Skipping ARGO eval.")
+        print(f"[!] INCOIS ARGO NetCDF not found at {argo_path}. Skipping Argo comparison.")
         return None
 
     ds_argo = xr.open_dataset(argo_path)
-    argo_var = "temp" if "temp" in ds_argo else list(ds_argo.data_vars)[0]
+    argo_var = require_var(ds_argo, "temp")
     da_argo = standardize_coords(ds_argo[argo_var])
-    
-    depth_dim = 'depth' if ('depth' in da_argo.coords or 'depth' in da_argo.dims) else None
-    if depth_dim:
-        da_argo = da_argo.interp({depth_dim: DEPTH_LEVELS}, method="linear", kwargs={"fill_value": "extrapolate"})
-        
-    da_argo_aligned = da_argo.interp(time=common_dates, method="nearest", kwargs={"fill_value": "extrapolate"}) if 'time' in da_argo.dims else da_argo
-    
+    if 'depth' in da_argo.dims:
+        dmin, dmax = float(da_argo['depth'].min()), float(da_argo['depth'].max())
+        da_argo = da_argo.interp(depth=DEPTH_LEVELS, method="linear")        # NaN outside [dmin, dmax]
+    else:
+        raise ValueError("[!] Argo file has no depth dimension")
+    check_time_coverage(da_argo, common_dates, "INCOIS Argo (monthly)", tolerance=pd.Timedelta("31D"))
+    t_argo = pd.DatetimeIndex(pd.to_datetime(da_argo['time'].values))
+
     val_start_t = max(0, int(0.8 * len(common_dates)))
-    patches_list, targets_list = [], []
     pad = patch_size // 2
-    
+    patches_list, targets_list, match_info = [], [], []
     for t_idx in range(val_start_t, len(common_dates)):
-        surf_t = surface_tensor_4d[t_idx]
-        argo_slice = da_argo_aligned.isel(time=t_idx) if 'time' in da_argo_aligned.dims else da_argo_aligned
-        argo_regrid = harmonizer.regrid_dataarray(argo_slice)
-        padded_surf = np.pad(surf_t, ((0, 0), (pad, pad), (pad, pad)), mode='reflect')
-        
-        for r in range(H):
-            for c in range(W):
-                target_p = argo_regrid[:, r, c]
-                if not np.isnan(target_p).any():
-                    patch = padded_surf[:, r:r+patch_size, c:c+patch_size]
-                    patches_list.append(patch)
-                    targets_list.append(target_p)
-                    
-    if len(patches_list) == 0:
-        print("[!] No valid ARGO profiles found in validation dates!")
+        k = int(np.argmin(np.abs((t_argo - common_dates[t_idx]).to_numpy())))
+        match_info.append({"day": str(common_dates[t_idx].date()), "argo_field_time": str(t_argo[k].date())})
+        argo_regrid = harmonizer.regrid_dataarray(da_argo.isel(time=k))
+        padded_surf = np.pad(surface_tensor_4d[t_idx], ((0, 0), (pad, pad), (pad, pad)), mode='reflect')
+        rows, cols = np.nonzero(np.isfinite(argo_regrid).any(axis=0))
+        for r, c in zip(rows, cols):
+            patches_list.append(padded_surf[:, r:r + patch_size, c:c + patch_size])
+            targets_list.append(argo_regrid[:, r, c])
+    if not patches_list:
+        print("[!] No Argo grid cells overlap the validation days.")
         return None
-        
-    patches_np = np.stack(patches_list, axis=0)
-    targets_np = np.stack(targets_list, axis=0)
-    
+
+    targets_np = np.stack(targets_list).astype(np.float64)
+    preds = []
     model.eval()
-    all_preds = []
-    
-    print(f"    - Running mini-batched GPU inference across {len(patches_np)} ARGO profiles (batch_size={batch_size})...")
     with torch.no_grad():
-        for i in range(0, len(patches_np), batch_size):
-            b_patches = torch.from_numpy(patches_np[i:i+batch_size]).float().to(device)
-            b_preds, _ = model(b_patches)
-            all_preds.append(b_preds.cpu().numpy())
-            
-    preds_np = np.concatenate(all_preds, axis=0)
-    
-    mae = np.mean(np.abs(preds_np - targets_np))
-    rmse_depth = np.sqrt(np.mean((preds_np - targets_np)**2, axis=0))
-    overall_rmse = np.sqrt(np.mean((preds_np - targets_np)**2))
-    
-    print(f"[✔] Gridded INCOIS ARGO Independent Evaluation Complete ({len(targets_np)} observations):")
-    print(f"    - Overall MAE against INCOIS ARGO: {mae:.4f} °C")
-    print(f"    - Overall True RMSE against INCOIS ARGO: {overall_rmse:.4f} °C")
-    print(f"    - Surface (0m) RMSE: {rmse_depth[0]:.4f} °C")
-    print(f"    - Thermocline (100m) RMSE: {rmse_depth[7]:.4f} °C")
-    print(f"    - Deep Ocean (1000m) RMSE: {rmse_depth[-1]:.4f} °C")
-    
-    # Plot validation comparison figure
-    plt.figure(figsize=(12, 5))
-    
-    plt.subplot(1, 2, 1)
-    plt.plot(rmse_depth, DEPTH_LEVELS, 'o-', color='#00d2ff', linewidth=2, label='OceanEmbed RMSE')
-    plt.gca().invert_yaxis()
-    plt.xlabel('RMSE (°C)')
-    plt.ylabel('Depth (m)')
-    plt.title('Vertical RMSE Profile vs INCOIS ARGO')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    
-    plt.subplot(1, 2, 2)
-    sample_indices = np.random.choice(len(targets_np), size=min(5, len(targets_np)), replace=False)
-    colors = plt.cm.viridis(np.linspace(0, 1, len(sample_indices)))
-    for idx, col in zip(sample_indices, colors):
-        plt.plot(targets_np[idx], DEPTH_LEVELS, '--', color=col, alpha=0.7, label='ARGO Obs')
-        plt.plot(preds_np[idx], DEPTH_LEVELS, '-', color=col, linewidth=2, label='OceanEmbed Pred')
-    plt.gca().invert_yaxis()
-    plt.xlabel('Temperature (°C)')
-    plt.ylabel('Depth (m)')
-    plt.title('Sample Vertical Temperature Profiles')
-    plt.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('incois_argo_validation.png', dpi=300)
-    plt.close()
-    print("[✔] Saved validation plot: 'incois_argo_validation.png'")
-    
-    return overall_rmse
+        for i in range(0, len(patches_list), batch_size):
+            b = torch.from_numpy(np.stack(patches_list[i:i + batch_size])).float().to(device)
+            preds.append(model(b)[0].cpu().numpy())
+    preds_np = np.concatenate(preds).astype(np.float64)
 
-def load_checkpoint_flexibly(model_obj, checkpoint_path):
-    state_dict = torch.load(checkpoint_path, map_location=device)
-    try:
-        model_obj.load_state_dict(state_dict)
-    except RuntimeError:
-        new_state = {}
-        for k, v in state_dict.items():
-            if k == "embedding.weight":
-                new_state["embedding.0.weight"] = v
-            elif k == "embedding.bias":
-                new_state["embedding.0.bias"] = v
-            elif k == "embedding.0.weight":
-                new_state["embedding.weight"] = v
-            elif k == "embedding.0.bias":
-                new_state["embedding.bias"] = v
-            else:
-                new_state[k] = v
-        model_obj.load_state_dict(new_state, strict=False)
+    ok = np.isfinite(targets_np)
+    err = np.where(ok, preds_np - targets_np, np.nan)
+    n_depth = ok.sum(axis=0)
+    rmse_depth = np.sqrt(np.nanmean(err ** 2, axis=0))
+    o, p = targets_np[ok], preds_np[ok]
+    rmse = float(np.sqrt(np.mean((p - o) ** 2)))
+    bias = float(np.mean(p - o))
+    mae = float(np.mean(np.abs(p - o)))
+    r2 = float(1.0 - np.sum((p - o) ** 2) / np.sum((o - o.mean()) ** 2))
+    rng = np.random.default_rng(0)
+    pick = rng.choice(o.size, size=min(scatter_n, o.size), replace=False)
+    depth_of = np.broadcast_to(DEPTH_LEVELS[None, :], ok.shape)[ok]
 
-# =============================================================================
-# MAIN EVALUATION PIPELINE
-# =============================================================================
+    print(f"[✔] {ok.any(axis=1).sum()} grid-cell-days, {o.size} level values: RMSE {rmse:.4f} °C, bias {bias:+.4f} °C, R² {r2:.4f}")
+    return {
+        "product": "INCOIS gridded monthly Argo analysis (incois_argo_mnt_VAM)",
+        "unit": "grid-cell-days (monthly gridded field matched to each validation day)",
+        "n_grid_cell_days": int(ok.any(axis=1).sum()),
+        "n_values": int(o.size),
+        "n_per_depth": n_depth.tolist(),
+        "product_depth_range_m": [dmin, dmax],
+        "time_matching": match_info,
+        "rmse_c": rmse, "mae_c": mae, "bias_c": bias, "r2": r2,
+        "rmse_by_depth_c": [None if not np.isfinite(v) else float(v) for v in rmse_depth],
+        "scatter_sample": {"observed_c": o[pick].round(3).tolist(), "predicted_c": p[pick].round(3).tolist(),
+                           "depth_m": depth_of[pick].tolist(), "n": int(pick.size), "seed": 0},
+    }
 
-def run_evaluation(data_dir="/kaggle/tmp/ocean_data", start_date="2023-01-01", end_date="2023-01-30"):
+
+def run_evaluation(data_dir="/kaggle/tmp/ocean_data", start_date="2023-01-01", end_date="2023-01-30",
+                   ckpt_dir=".", out_json="basin_output/eval_results.json"):
+    import json, hashlib, datetime as _dt
     print("=" * 75)
-    print("OceanEmbed — Checkpoint Evaluation & Summary Results Generator")
+    print("OceanEmbed — Checkpoint Evaluation")
     print("=" * 75)
-    
-    # 1. Ingest datasets and construct validation dataset
     surface_14ch_tensor, glorys_target_4d, common_dates, harmonizer = build_ocean_fields_from_netcdf(
-        data_dir=data_dir, start_date=start_date, end_date=end_date
-    )
-    
+        data_dir=data_dir, start_date=start_date, end_date=end_date)
     num_dates = len(common_dates)
     val_indices = list(range(int(0.8 * num_dates), num_dates))
     val_dataset = OceanPatchDataset(surface_14ch_tensor, glorys_target_4d, patch_size=31, time_indices=val_indices)
     val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False)
-    print(f"[+] Loaded Validation Dataset: {len(val_dataset)} spatial samples.")
-    
-    # 2. Evaluate Baseline 1 Checkpoint
-    b1_path = "best_b1_model.pth"
-    if os.path.exists(b1_path):
-        b1_model = BaselineSSTMLP(out_depths=15).to(device)
-        b1_model.load_state_dict(torch.load(b1_path, map_location=device))
-        b1_final_rmse = evaluate_model_rmse_true(b1_model, val_loader, model_type="b1")
-        print(f"[✔] Baseline 1 (SST MLP) Loaded Checkpoint Val RMSE: {b1_final_rmse:.4f} °C")
-    else:
-        b1_final_rmse = 1.0440  # Fallback to reported training log value
-        print(f"[!] Baseline 1 checkpoint not found on disk. Using training log value: {b1_final_rmse:.4f} °C")
+    print(f"[+] Validation set: {len(val_dataset)} samples on {len(val_indices)} held-out days.")
 
-    # 3. Evaluate Baseline 2 Checkpoint
-    b2_path = "best_b2_model.pth"
-    if os.path.exists(b2_path):
-        b2_model = BaselineMultiVarMLP(in_vars=7, out_depths=15).to(device)
-        b2_model.load_state_dict(torch.load(b2_path, map_location=device))
-        b2_final_rmse = evaluate_model_rmse_true(b2_model, val_loader, model_type="b2")
-        print(f"[✔] Baseline 2 (Multi-Var MLP) Loaded Checkpoint Val RMSE: {b2_final_rmse:.4f} °C")
-    else:
-        b2_final_rmse = 1.0573  # Fallback to reported training log value
-        print(f"[!] Baseline 2 checkpoint not found on disk. Using training log value: {b2_final_rmse:.4f} °C")
+    def sha(p):
+        return hashlib.sha256(open(p, "rb").read()).hexdigest()
 
-    # 4. Evaluate OceanEmbed Checkpoint
-    best_model_path = "best_oceanembed_model.pth"
-    if not os.path.exists(best_model_path):
-        raise FileNotFoundError(f"[!] Target checkpoint '{best_model_path}' not found! Please check file path.")
-        
-    model = OceanEmbed(in_channels=14, patch_size=31, embed_dim=128, out_depths=15).to(device)
-    load_checkpoint_flexibly(model, best_model_path)
-    print(f"[✔] OceanEmbed Model Checkpoint Loaded from '{best_model_path}'!")
-    
-    oceanembed_true_rmse = evaluate_model_rmse_true(model, val_loader, model_type="oceanembed")
-    print(f"[✔] OceanEmbed Target Architecture GLORYS Val RMSE: {oceanembed_true_rmse:.4f} °C")
+    models = []
+    specs = [("Baseline 1: SST-only MLP", "best_b1_model.pth", "b1", "SST at the cell (1 value)", lambda: BaselineSSTMLP(out_depths=15)),
+             ("Baseline 2: multi-variable MLP", "best_b2_model.pth", "b2", "7 surface variables at the cell", lambda: BaselineMultiVarMLP(in_vars=7, out_depths=15)),
+             ("OceanEmbed CNN", "best_oceanembed_model.pth", "oceanembed", "14-channel 31x31 patch", lambda: OceanEmbed(in_channels=14, patch_size=31, embed_dim=128, out_depths=15))]
+    oceanembed = None
+    for name, fname, kind, inputs, ctor in specs:
+        path = os.path.join(ckpt_dir, fname)
+        if not os.path.exists(path):
+            print(f"[!] {fname} not found: {name} not evaluated (no value is reported).")
+            models.append({"model": name, "inputs": inputs, "checkpoint": fname, "evaluated": False})
+            continue
+        m = ctor().to(device)
+        m.load_state_dict(torch.load(path, map_location=device), strict=True)
+        rmse, per_depth = evaluate_model_rmse_true(m, val_loader, model_type=kind)
+        print(f"[✔] {name}: RMSE vs GLORYS on held-out days = {rmse:.4f} °C")
+        models.append({"model": name, "inputs": inputs, "checkpoint": fname, "checkpoint_sha256": sha(path),
+                       "evaluated": True, "glorys_heldout_rmse_c": rmse, "glorys_heldout_rmse_by_depth_c": per_depth})
+        if kind == "oceanembed":
+            oceanembed = m
+    if oceanembed is None:
+        raise FileNotFoundError("best_oceanembed_model.pth not found")
 
-    # 5. Independent ARGO Evaluation
-    argo_rmse = evaluate_against_incois_argo(model, surface_14ch_tensor, common_dates, harmonizer, patch_size=31, data_dir=data_dir, batch_size=256)
+    argo = evaluate_against_incois_argo(oceanembed, surface_14ch_tensor, common_dates, harmonizer, data_dir=data_dir)
+    for mdl in models:
+        if mdl["model"] == "OceanEmbed CNN":
+            mdl["argo"] = argo
 
-    # 6. Print Hackathon Demo Summary Table
-    print("\n" + "=" * 75)
-    print("SUMMARY RESULTS TABLE (HONEST UNWEIGHTED PHYSICAL RMSE °C)")
-    print("=" * 75)
-    print(f"  1. Baseline 1 (SST-Only MLP)       GLORYS Val RMSE: {b1_final_rmse:.4f} °C")
-    print(f"  2. Baseline 2 (Multi-Var MLP)     GLORYS Val RMSE: {b2_final_rmse:.4f} °C")
-    print(f"  3. OceanEmbed Target Architecture GLORYS Val RMSE: {oceanembed_true_rmse:.4f} °C")
-    if argo_rmse is not None:
-        print(f"  4. OceanEmbed Independent INCOIS ARGO RMSE : {argo_rmse:.4f} °C")
-    print("=" * 75)
+    results = {
+        "created_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "date_range": f"{start_date}..{end_date}",
+        "heldout_days": [str(common_dates[i].date()) for i in val_indices],
+        "n_validation_samples": len(val_dataset),
+        "depth_levels_m": DEPTH_LEVELS.tolist(),
+        "models": models,
+        "glorys_note": "GLORYS12 is a reanalysis (model product) and was the training target; agreement with it is teacher-consistency, not observation skill.",
+    }
+    os.makedirs(os.path.dirname(os.path.abspath(out_json)), exist_ok=True)
+    with open(out_json, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"[✔] Wrote {out_json}")
+    return results
+
 
 if __name__ == "__main__":
-    run_evaluation()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data-dir", default="/kaggle/tmp/ocean_data")
+    ap.add_argument("--start", default="2023-01-01")
+    ap.add_argument("--end", default="2023-01-30")
+    ap.add_argument("--ckpt-dir", default=".")
+    ap.add_argument("--out", default="basin_output/eval_results.json")
+    a = ap.parse_args()
+    run_evaluation(a.data_dir, a.start, a.end, a.ckpt_dir, a.out)
